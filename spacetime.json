@@ -1,0 +1,8 @@
+{
+  "dev": {
+    "run": "npm run dev"
+  },
+  "module-path": "./spacetimedb",
+  "database": "next-exness-p83i0",
+  "server": "self-hosted"
+}
