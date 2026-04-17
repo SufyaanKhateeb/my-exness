@@ -111,7 +111,10 @@ export default function MarketTerminal() {
             onIntervalAmountChange={setIntervalAmount}
             onIntervalUnitChange={setIntervalUnit}
           />
-          <CandlestickChart candles={chartCandles} />
+          <CandlestickChart
+            candles={chartCandles}
+            precision={selectedMarket.precision}
+          />
         </div>
       </section>
     </div>
