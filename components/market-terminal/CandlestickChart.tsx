@@ -77,6 +77,7 @@ export function CandlestickChart({ candles }: CandlestickChartProps) {
     });
 
     resizeObserver.observe(container);
+    chartRef.current?.timeScale().fitContent();
 
     return () => {
       resizeObserver.disconnect();
@@ -91,8 +92,9 @@ export function CandlestickChart({ candles }: CandlestickChartProps) {
       return;
     }
 
+    console.log('inhere updating candles');
     seriesRef.current.setData(candles);
-    chartRef.current?.timeScale().fitContent();
+    // chartRef.current?.timeScale().fitContent();
   }, [candles]);
 
   return (
