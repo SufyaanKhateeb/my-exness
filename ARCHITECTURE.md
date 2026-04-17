@@ -205,3 +205,9 @@ Tech stack recommendation:
 - Implement auth with JWT/secure cookies and SpacetimeDB permission rules.
 - Model trading as orders, positions, trades, and accounts.
 - Use SpacetimeDB realtime subscriptions; do not add Redis pub/sub unless your architecture needs an external message bus.
+
+Natural next steps:
+
+Add an order book and fake bid/ask depth per market.
+Add portfolio, positions, and order reducers so the terminal can simulate trading.
+Elect a single market-maker process instead of client-driven ticking if you want the feed to run independently of open browser tabs.

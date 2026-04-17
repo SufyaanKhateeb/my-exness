@@ -11,5 +11,12 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  name: __t.string(),
+  id: __t.u64().primaryKey(),
+  marketId: __t.u32().name("market_id"),
+  bucketStart: __t.timestamp().name("bucket_start"),
+  open: __t.f64(),
+  high: __t.f64(),
+  low: __t.f64(),
+  close: __t.f64(),
+  volume: __t.f64(),
 });

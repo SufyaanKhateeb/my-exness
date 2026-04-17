@@ -8,9 +8,88 @@ import {
   t as __t,
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
-} from 'spacetimedb';
+} from "spacetimedb";
 
-export const Person = __t.object('Person', {
+export const Market = __t.object("Market", {
+  id: __t.u32(),
+  symbol: __t.string(),
+  baseAsset: __t.string(),
+  quoteAsset: __t.string(),
+  assetClass: __t.string(),
+  price: __t.f64(),
+  open24H: __t.f64(),
+  high24H: __t.f64(),
+  low24H: __t.f64(),
+  change24H: __t.f64(),
+  volume24H: __t.f64(),
+  spreadBps: __t.f64(),
+  changeRate: __t.f64(),
+  quoteIntervalMs: __t.u32(),
+  precision: __t.u8(),
+  updatedAt: __t.timestamp(),
+});
+export type Market = __Infer<typeof Market>;
+
+export const MarketDayCandle = __t.object("MarketDayCandle", {
+  id: __t.u64(),
+  marketId: __t.u32(),
+  bucketStart: __t.timestamp(),
+  open: __t.f64(),
+  high: __t.f64(),
+  low: __t.f64(),
+  close: __t.f64(),
+  volume: __t.f64(),
+});
+export type MarketDayCandle = __Infer<typeof MarketDayCandle>;
+
+export const MarketMinuteCandle = __t.object("MarketMinuteCandle", {
+  id: __t.u64(),
+  marketId: __t.u32(),
+  bucketStart: __t.timestamp(),
+  open: __t.f64(),
+  high: __t.f64(),
+  low: __t.f64(),
+  close: __t.f64(),
+  volume: __t.f64(),
+});
+export type MarketMinuteCandle = __Infer<typeof MarketMinuteCandle>;
+
+export const MarketState = __t.object("MarketState", {
+  marketId: __t.u32(),
+  seed: __t.u64(),
+  tick: __t.u32(),
+  minuteCandleId: __t.u64(),
+  minuteBucketStart: __t.timestamp(),
+  minuteOpen: __t.f64(),
+  minuteHigh: __t.f64(),
+  minuteLow: __t.f64(),
+  minuteClose: __t.f64(),
+  minuteVolume: __t.f64(),
+  dayCandleId: __t.u64(),
+  dayBucketStart: __t.timestamp(),
+  dayOpen: __t.f64(),
+  dayHigh: __t.f64(),
+  dayLow: __t.f64(),
+  dayClose: __t.f64(),
+  dayVolume: __t.f64(),
+});
+export type MarketState = __Infer<typeof MarketState>;
+
+export const MarketTickSchedule = __t.object("MarketTickSchedule", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  tickIntervalMs: __t.u32(),
+});
+export type MarketTickSchedule = __Infer<typeof MarketTickSchedule>;
+
+export const Person = __t.object("Person", {
   name: __t.string(),
 });
 export type Person = __Infer<typeof Person>;
+
+export const SimulatorState = __t.object("SimulatorState", {
+  id: __t.u8(),
+  nextCandleId: __t.u64(),
+});
+export type SimulatorState = __Infer<typeof SimulatorState>;
+
