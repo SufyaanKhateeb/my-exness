@@ -22,7 +22,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Auth0Provider>
+        <Auth0Provider audience={process.env.NEXT_PUBLIC_AUTH0_AUDIENCE}>
           <Providers>
             {children}
           </Providers>

@@ -1,5 +1,5 @@
 import { ScheduleAt, Timestamp } from 'spacetimedb';
-import { schema, table, t, type ReducerCtx } from 'spacetimedb/server';
+import { SenderError, schema, table, t, type ReducerCtx } from 'spacetimedb/server';
 
 const QUOTE_INTERVAL_MS = 600;
 const MINUTE_HISTORY_COUNT = 7 * 24 * 60;
@@ -10,6 +10,9 @@ const MAX_DAY_CANDLES_PER_MARKET = DAY_HISTORY_COUNT;
 const MS_PER_MINUTE = 60_000;
 const MS_PER_DAY = 86_400_000;
 const RNG_MASK = (1n << 64n) - 1n;
+const AUTH0_ISSUER = 'https://exness-auth.jp.auth0.com/';
+const AUTH0_AUDIENCE = 'https://my-exness-spacetimedb';
+const RESET_SIMULATION_PERMISSION = 'simulation:reset';
 
 type SeedMarket = {
   id: number;
@@ -215,6 +218,62 @@ const spacetimedb = schema({
 export default spacetimedb;
 
 type ExchangeCtx = ReducerCtx<typeof spacetimedb.schemaType>;
+
+function claimAsStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function hasScopeClaim(value: unknown, scope: string) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  return value.split(/\s+/).includes(scope);
+}
+
+function ensureAuth0Jwt(ctx: ExchangeCtx) {
+  const senderAuth = ctx.senderAuth;
+
+  if (senderAuth.isInternal) {
+    return null;
+  }
+
+  const jwt = senderAuth.jwt;
+
+  if (!jwt) {
+    throw new SenderError('Authentication required. Sign in with Auth0 to access this reducer.');
+  }
+
+  if (jwt.issuer !== AUTH0_ISSUER) {
+    throw new SenderError('Unauthorized issuer. This module only accepts Auth0 tokens from the configured tenant.');
+  }
+
+  if (!jwt.audience.includes(AUTH0_AUDIENCE)) {
+    throw new SenderError('Invalid Auth0 audience for this SpacetimeDB module.');
+  }
+
+  return jwt;
+}
+
+function ensurePermission(ctx: ExchangeCtx, permission: string) {
+  const jwt = ensureAuth0Jwt(ctx);
+
+  if (!jwt) {
+    return;
+  }
+
+  const permissions = claimAsStringArray(jwt.fullPayload.permissions);
+
+  if (permissions.includes(permission) || hasScopeClaim(jwt.fullPayload.scope, permission)) {
+    return;
+  }
+
+  throw new SenderError(`Permission \"${permission}\" is required.`);
+}
 
 function timestampFromMillis(value: number) {
   return Timestamp.fromDate(new Date(value));
@@ -527,6 +586,10 @@ export const onConnect = spacetimedb.clientConnected(ctx => {
   ) {
     seedSimulator(ctx);
   }
+
+  if (ctx.senderAuth.hasJWT) {
+    ensureAuth0Jwt(ctx);
+  }
 });
 
 export const onDisconnect = spacetimedb.clientDisconnected(() => {
@@ -536,11 +599,14 @@ export const onDisconnect = spacetimedb.clientDisconnected(() => {
 export const add = spacetimedb.reducer(
   { name: t.string() },
   (ctx, { name }) => {
+    ensureAuth0Jwt(ctx);
     ctx.db.person.insert({ name });
   }
 );
 
 export const resetSimulation = spacetimedb.reducer(ctx => {
+  ensurePermission(ctx, RESET_SIMULATION_PERMISSION);
+
   for (const schedule of Array.from(ctx.db.marketTickSchedule.iter())) {
     ctx.db.marketTickSchedule.delete(schedule);
   }
@@ -571,6 +637,10 @@ export const resetSimulation = spacetimedb.reducer(ctx => {
 export const tickMarkets = spacetimedb.reducer(
   { arg: marketTickScheduleRow },
   (ctx, { arg }) => {
+    if (ctx.sender != ctx.identity) {
+      throw new SenderError('tickMarkets reducer can only be called by the scheduler');
+    }
+
     const simulator = Array.from(ctx.db.simulatorState.iter())[0];
     if (!simulator) {
       seedSimulator(ctx);
@@ -740,6 +810,7 @@ export const tickMarkets = spacetimedb.reducer(
 );
 
 export const sayHello = spacetimedb.reducer(ctx => {
+  ensureAuth0Jwt(ctx);
   for (const person of ctx.db.person.iter()) {
     console.info(`Hello, ${person.name}!`);
   }
