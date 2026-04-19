@@ -44,6 +44,7 @@ import SayHelloReducer from "./say_hello_reducer";
 import MarketRow from "./market_table";
 import MarketDayCandleRow from "./market_day_candle_table";
 import MarketMinuteCandleRow from "./market_minute_candle_table";
+import MarketSnapshotRow from "./market_snapshot_table";
 import PersonRow from "./person_table";
 
 /** Type-only namespace exports for generated type groups. */
@@ -68,8 +69,15 @@ const tablesSchema = __schema({
   marketDayCandle: __table({
     name: 'market_day_candle',
     indexes: [
+      { accessor: 'bucketStart', name: 'market_day_candle_bucket_start_idx_btree', algorithm: 'btree', columns: [
+        'bucketStart',
+      ] },
       { accessor: 'id', name: 'market_day_candle_id_idx_btree', algorithm: 'btree', columns: [
         'id',
+      ] },
+      { accessor: 'market_day_candle_idx', name: 'market_day_candle_market_id_bucket_start_idx_btree', algorithm: 'btree', columns: [
+        'marketId',
+        'bucketStart',
       ] },
       { accessor: 'marketId', name: 'market_day_candle_market_id_idx_btree', algorithm: 'btree', columns: [
         'marketId',
@@ -82,8 +90,15 @@ const tablesSchema = __schema({
   marketMinuteCandle: __table({
     name: 'market_minute_candle',
     indexes: [
+      { accessor: 'bucketStart', name: 'market_minute_candle_bucket_start_idx_btree', algorithm: 'btree', columns: [
+        'bucketStart',
+      ] },
       { accessor: 'id', name: 'market_minute_candle_id_idx_btree', algorithm: 'btree', columns: [
         'id',
+      ] },
+      { accessor: 'market_minute_candle_idx', name: 'market_minute_candle_market_id_bucket_start_idx_btree', algorithm: 'btree', columns: [
+        'marketId',
+        'bucketStart',
       ] },
       { accessor: 'marketId', name: 'market_minute_candle_market_id_idx_btree', algorithm: 'btree', columns: [
         'marketId',
@@ -93,6 +108,17 @@ const tablesSchema = __schema({
       { name: 'market_minute_candle_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, MarketMinuteCandleRow),
+  marketSnapshot: __table({
+    name: 'market_snapshot',
+    indexes: [
+      { accessor: 'marketId', name: 'market_snapshot_market_id_idx_btree', algorithm: 'btree', columns: [
+        'marketId',
+      ] },
+    ],
+    constraints: [
+      { name: 'market_snapshot_market_id_key', constraint: 'unique', columns: ['marketId'] },
+    ],
+  }, MarketSnapshotRow),
   person: __table({
     name: 'person',
     indexes: [

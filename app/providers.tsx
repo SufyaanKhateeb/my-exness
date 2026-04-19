@@ -55,8 +55,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
           // scope: AUTH0_SCOPE || undefined,
         });
 
-        console.log('token', token);
-
         if (!cancelled) {
           setAuth0Token(token);
           setIsAuth0TokenReady(true);

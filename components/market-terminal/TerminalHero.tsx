@@ -1,7 +1,5 @@
 'use client';
 
-import type { Market } from '@/src/module_bindings/types';
-
 import {
   formatCompactVolume,
   formatPercent,
@@ -11,8 +9,22 @@ import {
   type IntervalUnit,
 } from '@/lib/market-terminal';
 
+export type TerminalHeroMarket = {
+  symbol: string;
+  assetClass: string;
+  precision: number;
+  price: number;
+  change24H: number;
+  high24H: number;
+  low24H: number;
+  volume24H: number;
+  spreadBps: number;
+  changeRate: number;
+  quoteIntervalMs: number;
+};
+
 type TerminalHeroProps = {
-  market: Market;
+  market: TerminalHeroMarket;
   intervalAmount: number;
   intervalUnit: IntervalUnit;
 };

@@ -4,6 +4,14 @@ export const MS_PER_MINUTE = 60_000;
 export const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 export const MS_PER_DAY = 24 * MS_PER_HOUR;
 export const CHART_HEIGHT = 430;
+export const HISTORY_LOAD_THRESHOLD_BARS = 50;
+
+const MINUTE_HISTORY_RETENTION_MS = 1000 * MS_PER_DAY;
+const DAY_HISTORY_RETENTION_MS = 1000 * MS_PER_DAY;
+const DEFAULT_HISTORY_BAR_TARGET = 180;
+const HISTORY_CHUNK_BAR_TARGET = 120;
+const APPROX_DAYS_PER_WEEK = 7;
+const APPROX_DAYS_PER_MONTH = 30;
 
 export const FALLBACK_CANDLES: CandlestickData[] = [
   { time: 1_712_707_200 as UTCTimestamp, open: 64120, high: 64280, low: 63980, close: 64190 },
@@ -19,6 +27,7 @@ export const FALLBACK_CANDLES: CandlestickData[] = [
 export type IntervalUnit = 'minute' | 'hour' | 'day' | 'week' | 'month';
 
 export type SourceCandle = {
+  id: bigint;
   marketId: number;
   bucketStart: { toMillis(): bigint };
   open: number;
@@ -30,6 +39,81 @@ export type SourceCandle = {
 
 export function sortByBucketStart(left: SourceCandle, right: SourceCandle) {
   return Number(left.bucketStart.toMillis() - right.bucketStart.toMillis());
+}
+
+export function areSourceCandlesEqual(
+  left: readonly SourceCandle[],
+  right: readonly SourceCandle[]
+) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftCandle = left[index];
+    const rightCandle = right[index];
+
+    if (
+      leftCandle.marketId !== rightCandle.marketId ||
+      leftCandle.bucketStart.toMillis() !== rightCandle.bucketStart.toMillis() ||
+      leftCandle.open !== rightCandle.open ||
+      leftCandle.high !== rightCandle.high ||
+      leftCandle.low !== rightCandle.low ||
+      leftCandle.close !== rightCandle.close ||
+      leftCandle.volume !== rightCandle.volume
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function getStableSortedSourceCandles(
+  previous: readonly SourceCandle[],
+  next: readonly SourceCandle[],
+) {
+  const sortedNext = Array.from(next).sort(sortByBucketStart);
+
+  let i = 0, j = 0;
+
+  const result : SourceCandle[] = [];
+    while (i < previous.length && j < sortedNext.length) {
+        const left = previous[i];
+        const right = sortedNext[j];
+
+        if (left.id === right.id) {
+            // left.bucketStart = right.bucketStart;
+            // left.open = right.open;
+            // left.high = right.high;
+            // left.low = right.low;
+            // left.close = right.close;
+            // left.volume = right.volume;
+            result.push(left);
+            i++;
+            j++;
+        } else if (left.bucketStart.toMillis() < right.bucketStart.toMillis()) {
+            result.push(left);
+            i++;
+        } else {
+            result.push(right);
+            j++;
+        }
+    }
+
+    while (i < previous.length) {
+        result.push(previous[i]);
+        i++;
+    }
+    
+    while (j < sortedNext.length) {
+        result.push(sortedNext[j]);
+        j++;
+    }
+
+    console.log(previous.length, next.length, result.length)
+
+  return result;
 }
 
 export function formatPrice(price: number, precision: number) {
@@ -69,6 +153,48 @@ export function getIntervalLabel(amount: number, unit: IntervalUnit) {
   return `${amount}${suffix}`;
 }
 
+export function usesMinuteSource(unit: IntervalUnit) {
+  return unit === 'minute' || unit === 'hour';
+}
+
+export function getHistoryRetentionMs(unit: IntervalUnit) {
+  return usesMinuteSource(unit) ? MINUTE_HISTORY_RETENTION_MS : DAY_HISTORY_RETENTION_MS;
+}
+
+export function getDisplayedIntervalMs(amount: number, unit: IntervalUnit) {
+  if (unit === 'minute') {
+    return amount * MS_PER_MINUTE;
+  }
+
+  if (unit === 'hour') {
+    return amount * MS_PER_HOUR;
+  }
+
+  if (unit === 'day') {
+    return amount * MS_PER_DAY;
+  }
+
+  if (unit === 'week') {
+    return amount * APPROX_DAYS_PER_WEEK * MS_PER_DAY;
+  }
+
+  return amount * APPROX_DAYS_PER_MONTH * MS_PER_DAY;
+}
+
+export function getInitialHistoryWindowMs(amount: number, unit: IntervalUnit) {
+  return Math.min(
+    getHistoryRetentionMs(unit),
+    getDisplayedIntervalMs(amount, unit) * DEFAULT_HISTORY_BAR_TARGET
+  );
+}
+
+export function getHistoryChunkWindowMs(amount: number, unit: IntervalUnit) {
+  return Math.min(
+    getHistoryRetentionMs(unit),
+    getDisplayedIntervalMs(amount, unit) * HISTORY_CHUNK_BAR_TARGET
+  );
+}
+
 function getBucketStartMs(value: number, unit: IntervalUnit, amount: number) {
   if (unit === 'minute') {
     return Math.floor(value / (amount * MS_PER_MINUTE)) * amount * MS_PER_MINUTE;
@@ -101,7 +227,7 @@ function getBucketStartMs(value: number, unit: IntervalUnit, amount: number) {
   return Date.UTC(Math.floor(bucketMonth / 12), bucketMonth % 12, 1);
 }
 
-export function aggregateCandles(rows: SourceCandle[], amount: number, unit: IntervalUnit) {
+export function aggregateCandles(rows: readonly SourceCandle[], amount: number, unit: IntervalUnit) {
   const buckets = new Map<
     number,
     {

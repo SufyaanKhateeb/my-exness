@@ -1,11 +1,18 @@
 'use client';
 
-import type { Market } from '@/src/module_bindings/types';
-
 import { formatPercent, formatPrice } from '@/lib/market-terminal';
 
+export type MarketSidebarItem = {
+  id: number;
+  symbol: string;
+  assetClass: string;
+  precision: number;
+  price: number;
+  change24H: number;
+};
+
 type MarketSidebarProps = {
-  markets: Market[];
+  markets: MarketSidebarItem[];
   selectedMarketId: number;
   onSelectMarket: (marketId: number) => void;
   onResetSimulation: () => void;

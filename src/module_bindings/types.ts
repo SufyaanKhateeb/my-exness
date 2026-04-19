@@ -16,17 +16,10 @@ export const Market = __t.object("Market", {
   baseAsset: __t.string(),
   quoteAsset: __t.string(),
   assetClass: __t.string(),
-  price: __t.f64(),
-  open24H: __t.f64(),
-  high24H: __t.f64(),
-  low24H: __t.f64(),
-  change24H: __t.f64(),
-  volume24H: __t.f64(),
   spreadBps: __t.f64(),
   changeRate: __t.f64(),
   quoteIntervalMs: __t.u32(),
   precision: __t.u8(),
-  updatedAt: __t.timestamp(),
 });
 export type Market = __Infer<typeof Market>;
 
@@ -53,6 +46,18 @@ export const MarketMinuteCandle = __t.object("MarketMinuteCandle", {
   volume: __t.f64(),
 });
 export type MarketMinuteCandle = __Infer<typeof MarketMinuteCandle>;
+
+export const MarketSnapshot = __t.object("MarketSnapshot", {
+  marketId: __t.u32(),
+  price: __t.f64(),
+  open24H: __t.f64(),
+  high24H: __t.f64(),
+  low24H: __t.f64(),
+  change24H: __t.f64(),
+  volume24H: __t.f64(),
+  updatedAt: __t.timestamp(),
+});
+export type MarketSnapshot = __Infer<typeof MarketSnapshot>;
 
 export const MarketState = __t.object("MarketState", {
   marketId: __t.u32(),

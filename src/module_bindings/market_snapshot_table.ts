@@ -11,13 +11,12 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  id: __t.u32().primaryKey(),
-  symbol: __t.string(),
-  baseAsset: __t.string().name("base_asset"),
-  quoteAsset: __t.string().name("quote_asset"),
-  assetClass: __t.string().name("asset_class"),
-  spreadBps: __t.f64().name("spread_bps"),
-  changeRate: __t.f64().name("change_rate"),
-  quoteIntervalMs: __t.u32().name("quote_interval_ms"),
-  precision: __t.u8(),
+  marketId: __t.u32().primaryKey().name("market_id"),
+  price: __t.f64(),
+  open24H: __t.f64().name("open_24_h"),
+  high24H: __t.f64().name("high_24_h"),
+  low24H: __t.f64().name("low_24_h"),
+  change24H: __t.f64().name("change_24_h"),
+  volume24H: __t.f64().name("volume_24_h"),
+  updatedAt: __t.timestamp().name("updated_at"),
 });

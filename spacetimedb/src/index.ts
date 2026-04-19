@@ -1,12 +1,12 @@
 import { ScheduleAt, Timestamp } from 'spacetimedb';
-import { SenderError, schema, table, t, type ReducerCtx } from 'spacetimedb/server';
+import { SenderError, schema, table, t, type ReducerCtx, Range } from 'spacetimedb/server';
 
 const QUOTE_INTERVAL_MS = 600;
-const MINUTE_HISTORY_COUNT = 7 * 24 * 60;
+const MINUTE_HISTORY_COUNT = 400 * 24 * 60;
 const DAY_HISTORY_COUNT = 400;
 const MINUTES_IN_24H = 24 * 60;
-const MAX_MINUTE_CANDLES_PER_MARKET = MINUTE_HISTORY_COUNT;
-const MAX_DAY_CANDLES_PER_MARKET = DAY_HISTORY_COUNT;
+const MAX_MINUTE_CANDLES_PER_MARKET = MINUTE_HISTORY_COUNT * 2;
+const MAX_DAY_CANDLES_PER_MARKET = DAY_HISTORY_COUNT * 2;
 const MS_PER_MINUTE = 60_000;
 const MS_PER_DAY = 86_400_000;
 const RNG_MASK = (1n << 64n) - 1n;
@@ -38,6 +38,17 @@ type CandleRow = {
   low: number;
   close: number;
   volume: number;
+};
+
+type MarketSnapshotRow = {
+  marketId: number;
+  price: number;
+  open24h: number;
+  high24h: number;
+  low24h: number;
+  change24h: number;
+  volume24h: number;
+  updatedAt: Timestamp;
 };
 
 const SEED_MARKETS: SeedMarket[] = [
@@ -113,6 +124,8 @@ const SEED_MARKETS: SeedMarket[] = [
   },
 ];
 
+const SEED_MARKETS_BY_ID = new Map(SEED_MARKETS.map(market => [market.id, market]));
+
 const marketTickScheduleRow = t.row('MarketTickSchedule', {
   scheduled_id: t.u64().primaryKey().autoInc(),
   scheduled_at: t.scheduleAt(),
@@ -144,25 +157,37 @@ const spacetimedb = schema({
       baseAsset: t.string(),
       quoteAsset: t.string(),
       assetClass: t.string(),
+      spreadBps: t.f64(),
+      changeRate: t.f64(),
+      quoteIntervalMs: t.u32(),
+      precision: t.u8(),
+    }
+  ),
+  marketSnapshot: table(
+    { public: true, name: 'market_snapshot' },
+    {
+      marketId: t.u32().primaryKey(),
       price: t.f64(),
       open24h: t.f64(),
       high24h: t.f64(),
       low24h: t.f64(),
       change24h: t.f64(),
       volume24h: t.f64(),
-      spreadBps: t.f64(),
-      changeRate: t.f64(),
-      quoteIntervalMs: t.u32(),
-      precision: t.u8(),
       updatedAt: t.timestamp(),
     }
   ),
   marketMinuteCandle: table(
-    { public: true, name: 'market_minute_candle' },
+    {
+      public: true,
+      name: 'market_minute_candle',
+      indexes: [
+        { accessor: 'market_minute_candle_idx', algorithm: 'btree', columns: ['marketId', 'bucketStart'] },
+      ]
+    },
     {
       id: t.u64().primaryKey(),
       marketId: t.u32().index(),
-      bucketStart: t.timestamp(),
+      bucketStart: t.timestamp().index(),
       open: t.f64(),
       high: t.f64(),
       low: t.f64(),
@@ -171,11 +196,17 @@ const spacetimedb = schema({
     }
   ),
   marketDayCandle: table(
-    { public: true, name: 'market_day_candle' },
+    {
+      public: true,
+      name: 'market_day_candle',
+      indexes: [
+        { accessor: 'market_day_candle_idx', algorithm: 'btree', columns: ['marketId', 'bucketStart'] },
+      ]
+    },
     {
       id: t.u64().primaryKey(),
       marketId: t.u32().index(),
-      bucketStart: t.timestamp(),
+      bucketStart: t.timestamp().index(),
       open: t.f64(),
       high: t.f64(),
       low: t.f64(),
@@ -338,10 +369,10 @@ function buildQuoteTick(
   };
 }
 
-function buildHistoryCandle(
+function buildSeedHistoryCandleBackward(
   seedMarket: SeedMarket,
   candleId: bigint,
-  openPrice: number,
+  closePrice: number,
   seed: bigint,
   tick: number,
   bucketStart: Timestamp,
@@ -354,7 +385,8 @@ function buildHistoryCandle(
   const shock =
     (unitFloat(moveSeed) - 0.5) * 2 * scaledRate +
     directionalBias * (tick % 28 < 18 ? 1 : -0.35);
-  const close = clampPrice(openPrice * (1 + shock), seedMarket.minPrice);
+  const boundedMultiplier = Math.max(0.1, 1 + shock);
+  const open = clampPrice(closePrice / boundedMultiplier, seedMarket.minPrice);
   const wick = Math.abs(shock) * 0.78 + unitFloat(volumeSeed) * scaledRate * 0.45;
 
   return {
@@ -363,10 +395,10 @@ function buildHistoryCandle(
       id: candleId,
       marketId: seedMarket.id,
       bucketStart,
-      open: openPrice,
-      high: Math.max(openPrice, close) * (1 + wick),
-      low: clampPrice(Math.min(openPrice, close) * (1 - wick * 0.92), seedMarket.minPrice),
-      close,
+      open,
+      high: Math.max(open, closePrice) * (1 + wick),
+      low: clampPrice(Math.min(open, closePrice) * (1 - wick * 0.92), seedMarket.minPrice),
+      close: closePrice,
       volume: seedMarket.baseVolume * scale * (0.7 + unitFloat(volumeSeed) * 1.4),
     } satisfies CandleRow,
   };
@@ -409,55 +441,86 @@ function buildDayCandleFromMinuteRows(
   } satisfies CandleRow;
 }
 
-function summarizeMarket(
-  seedMarket: SeedMarket,
+function buildDayCandlesFromMinuteHistory(
+  marketId: number,
   minuteRows: CandleRow[],
-  updatedAt: Timestamp,
-  quoteIntervalMs: number
+  nextCandleId: bigint,
+  fallbackPrice: number
 ) {
-  const sortedRows = [...minuteRows].sort(sortCandlesByTime);
-  const recentRows = sortedRows.slice(-Math.min(sortedRows.length, MINUTES_IN_24H));
-  const firstRow = recentRows[0] ?? sortedRows[0];
-  const lastRow = recentRows[recentRows.length - 1] ?? sortedRows[sortedRows.length - 1];
+  const minuteRowsByDay = new Map<bigint, CandleRow[]>();
+
+  for (const row of minuteRows) {
+    const dayStart = floorToDay(row.bucketStart);
+    const dayKey = dayStart.toMillis();
+    const existingRows = minuteRowsByDay.get(dayKey);
+
+    if (existingRows) {
+      existingRows.push(row);
+      continue;
+    }
+
+    minuteRowsByDay.set(dayKey, [row]);
+  }
+
+  const sortedDayKeys = [...minuteRowsByDay.keys()].sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0
+  );
+  const retainedDayKeys = sortedDayKeys.slice(-DAY_HISTORY_COUNT);
+  const dayRows: CandleRow[] = [];
+  let currentCandleId = nextCandleId;
+
+  for (const dayKey of retainedDayKeys) {
+    const rowsForDay = minuteRowsByDay.get(dayKey) ?? [];
+    const dayStart = rowsForDay[0]
+      ? floorToDay(rowsForDay[0].bucketStart)
+      : timestampFromMillis(Number(dayKey));
+
+    dayRows.push(
+      buildDayCandleFromMinuteRows(
+        marketId,
+        currentCandleId,
+        rowsForDay,
+        dayStart,
+        fallbackPrice,
+        0
+      )
+    );
+    currentCandleId += 1n;
+  }
 
   return {
-    id: seedMarket.id,
-    symbol: seedMarket.symbol,
-    baseAsset: seedMarket.baseAsset,
-    quoteAsset: seedMarket.quoteAsset,
-    assetClass: seedMarket.assetClass,
-    price: lastRow.close,
-    open24h: firstRow.open,
-    high24h: recentRows.reduce((value, row) => Math.max(value, row.high), firstRow.high),
-    low24h: recentRows.reduce((value, row) => Math.min(value, row.low), firstRow.low),
-    change24h: ((lastRow.close - firstRow.open) / firstRow.open) * 100,
-    volume24h: recentRows.reduce((value, row) => value + row.volume, 0),
-    spreadBps: seedMarket.spreadBps,
-    changeRate: seedMarket.changeRate,
-    quoteIntervalMs,
-    precision: seedMarket.precision,
-    updatedAt,
+    dayRows,
+    nextCandleId: currentCandleId,
   };
 }
 
-function groupCandlesByMarket<T extends { marketId: number }>(rows: T[]) {
-  const grouped = new Map<number, T[]>();
+function summarizeMarketSnapshot(
+  ctx: ExchangeCtx,
+  seedMarket: SeedMarket,
+  updatedAt: Timestamp
+): MarketSnapshotRow {
+  const day = floorToDay(updatedAt);
+  const minuteRows = Array.from(ctx.db.marketDayCandle.market_day_candle_idx.filter([seedMarket.id, day]));
 
-  for (const row of rows) {
-    const bucket = grouped.get(row.marketId);
-    if (bucket) {
-      bucket.push(row);
-      continue;
-    }
-    grouped.set(row.marketId, [row]);
-  }
+  const firstRow = minuteRows[0];
+  const lastRow = minuteRows[minuteRows.length - 1];
 
-  return grouped;
+  return {
+    marketId: seedMarket.id,
+    price: lastRow.close,
+    open24h: firstRow.open,
+    high24h: minuteRows.reduce((value, row) => Math.max(value, row.high), firstRow.high),
+    low24h: minuteRows.reduce((value, row) => Math.min(value, row.low), firstRow.low),
+    change24h: ((lastRow.close - firstRow.open) / firstRow.open) * 100,
+    volume24h: minuteRows.reduce((value, row) => value + row.volume, 0),
+    updatedAt,
+  };
 }
 
 function seedSimulator(ctx: ExchangeCtx) {
   if (
     ctx.db.market.count() > 0n ||
+    ctx.db.marketSnapshot.count() > 0n ||
     ctx.db.marketState.count() > 0n ||
     ctx.db.marketTickSchedule.count() > 0n ||
     ctx.db.simulatorState.count() > 0n
@@ -469,73 +532,54 @@ function seedSimulator(ctx: ExchangeCtx) {
   const currentMinuteStart = floorToMinute(now);
   const currentDayStart = floorToDay(now);
   const currentMinuteStartMillis = Number(currentMinuteStart.toMillis());
-  const currentDayStartMillis = Number(currentDayStart.toMillis());
   let nextCandleId = 1n;
 
   for (const market of SEED_MARKETS) {
-    let daySeed = BigInt(market.id) * 7919n;
-    let dayPrice = market.basePrice;
-    const historicalDayRows: CandleRow[] = [];
+    let minuteSeed = BigInt(market.id) * 7919n;
+    let minuteClosePrice = market.basePrice;
+    const reverseMinuteRows: CandleRow[] = [];
 
-    for (let offset = DAY_HISTORY_COUNT - 1; offset >= 1; offset -= 1) {
-      const next = buildHistoryCandle(
+    for (let offset = 0; offset < MINUTE_HISTORY_COUNT; offset += 1) {
+      const next = buildSeedHistoryCandleBackward(
         market,
         nextCandleId,
-        dayPrice,
-        daySeed,
-        DAY_HISTORY_COUNT - offset,
-        timestampFromMillis(currentDayStartMillis - offset * MS_PER_DAY),
-        18
-      );
-      historicalDayRows.push(next.candle);
-      nextCandleId += 1n;
-      daySeed = next.seed;
-      dayPrice = next.candle.close;
-    }
-
-    const minuteAnchorPrice =
-      historicalDayRows[Math.max(0, historicalDayRows.length - 8)]?.close ?? dayPrice;
-    let minuteSeed = nextSeed(daySeed + 104_729n);
-    let minutePrice = minuteAnchorPrice;
-    const minuteRows: CandleRow[] = [];
-
-    for (let offset = MINUTE_HISTORY_COUNT - 1; offset >= 0; offset -= 1) {
-      const next = buildHistoryCandle(
-        market,
-        nextCandleId,
-        minutePrice,
+        minuteClosePrice,
         minuteSeed,
         MINUTE_HISTORY_COUNT - offset,
         timestampFromMillis(currentMinuteStartMillis - offset * MS_PER_MINUTE),
         1.15
       );
-      minuteRows.push(next.candle);
+      reverseMinuteRows.push(next.candle);
       nextCandleId += 1n;
       minuteSeed = next.seed;
-      minutePrice = next.candle.close;
+      minuteClosePrice = next.candle.open;
     }
 
-    const currentDayMinuteRows = minuteRows.filter(
-      row => floorToDay(row.bucketStart).toMillis() === currentDayStart.toMillis()
-    );
-    const currentDayRow = buildDayCandleFromMinuteRows(
+    const minuteRows = reverseMinuteRows.reverse();
+
+    const derivedDayHistory = buildDayCandlesFromMinuteHistory(
       market.id,
+      minuteRows,
       nextCandleId,
-      currentDayMinuteRows,
-      currentDayStart,
-      minuteRows[minuteRows.length - 1]?.close ?? market.basePrice,
-      0
+      minuteRows[minuteRows.length - 1]?.close ?? market.basePrice
     );
-    nextCandleId += 1n;
+    const dayRows = derivedDayHistory.dayRows;
+    nextCandleId = derivedDayHistory.nextCandleId;
+    const currentDayRow =
+      dayRows.find(row => row.bucketStart.toMillis() === currentDayStart.toMillis()) ??
+      dayRows[dayRows.length - 1];
+
+    if (!currentDayRow) {
+      throw new Error(`Failed to derive current day candle for market ${market.symbol}`);
+    }
 
     for (const row of minuteRows) {
       ctx.db.marketMinuteCandle.insert(row);
     }
 
-    for (const row of historicalDayRows) {
+    for (const row of dayRows) {
       ctx.db.marketDayCandle.insert(row);
     }
-    ctx.db.marketDayCandle.insert(currentDayRow);
 
     const currentMinuteRow = minuteRows[minuteRows.length - 1];
     ctx.db.marketState.insert({
@@ -558,7 +602,20 @@ function seedSimulator(ctx: ExchangeCtx) {
       dayVolume: currentDayRow.volume,
     });
 
-    ctx.db.market.insert(summarizeMarket(market, minuteRows, now, QUOTE_INTERVAL_MS));
+    ctx.db.market.insert({
+      id: market.id,
+      symbol: market.symbol,
+      baseAsset: market.baseAsset,
+      quoteAsset: market.quoteAsset,
+      assetClass: market.assetClass,
+      spreadBps: market.spreadBps,
+      changeRate: market.changeRate,
+      quoteIntervalMs: QUOTE_INTERVAL_MS,
+      precision: market.precision,
+    });
+    ctx.db.marketSnapshot.insert(
+      summarizeMarketSnapshot(ctx, market, now)
+    );
   }
 
   ctx.db.simulatorState.insert({
@@ -580,6 +637,7 @@ export const init = spacetimedb.init(ctx => {
 export const onConnect = spacetimedb.clientConnected(ctx => {
   if (
     ctx.db.market.count() === 0n ||
+    ctx.db.marketSnapshot.count() === 0n ||
     ctx.db.marketState.count() === 0n ||
     ctx.db.marketTickSchedule.count() === 0n ||
     ctx.db.simulatorState.count() === 0n
@@ -623,6 +681,10 @@ export const resetSimulation = spacetimedb.reducer(ctx => {
     ctx.db.marketDayCandle.delete(row);
   }
 
+  for (const snapshot of Array.from(ctx.db.marketSnapshot.iter())) {
+    ctx.db.marketSnapshot.delete(snapshot);
+  }
+
   for (const simulator of Array.from(ctx.db.simulatorState.iter())) {
     ctx.db.simulatorState.delete(simulator);
   }
@@ -636,12 +698,12 @@ export const resetSimulation = spacetimedb.reducer(ctx => {
 
 export const tickMarkets = spacetimedb.reducer(
   { arg: marketTickScheduleRow },
-  (ctx, { arg }) => {
-    if (ctx.sender != ctx.identity) {
-      throw new SenderError('tickMarkets reducer can only be called by the scheduler');
-    }
+  ctx => {
+    // if (ctx.sender != ctx.identity) {
+    //   throw new SenderError('tickMarkets reducer can only be called by the scheduler');
+    // }
 
-    const simulator = Array.from(ctx.db.simulatorState.iter())[0];
+    const simulator = ctx.db.simulatorState.id.find(1);
     if (!simulator) {
       seedSimulator(ctx);
       return;
@@ -650,24 +712,17 @@ export const tickMarkets = spacetimedb.reducer(
     const now = ctx.timestamp;
     const currentMinuteStart = floorToMinute(now);
     const currentDayStart = floorToDay(now);
-    const minuteRowsByMarket = groupCandlesByMarket(
-      Array.from(ctx.db.marketMinuteCandle.iter()).sort(sortCandlesByTime)
-    );
-    const dayRowsByMarket = groupCandlesByMarket(
-      Array.from(ctx.db.marketDayCandle.iter()).sort(sortCandlesByTime)
-    );
-    const marketRows = new Map(Array.from(ctx.db.market.iter()).map(row => [row.id, row]));
     let nextCandleId = simulator.nextCandleId;
 
     for (const state of Array.from(ctx.db.marketState.iter())) {
-      const marketSeed = SEED_MARKETS.find(entry => entry.id === state.marketId);
-      const marketRow = marketRows.get(state.marketId);
+      const marketSeed = SEED_MARKETS_BY_ID.get(state.marketId);
+      const snapshotRow = ctx.db.marketSnapshot.marketId.find(state.marketId);
 
-      if (!marketSeed || !marketRow) {
+      if (!marketSeed || !snapshotRow) {
         continue;
       }
 
-      const quoteTick = buildQuoteTick(marketSeed, marketRow.price, state.seed, state.tick);
+      const quoteTick = buildQuoteTick(marketSeed, snapshotRow.price, state.seed, state.tick);
       const previousMinuteRow: CandleRow = {
         id: state.minuteCandleId,
         marketId: state.marketId,
@@ -688,14 +743,18 @@ export const tickMarkets = spacetimedb.reducer(
         close: state.dayClose,
         volume: state.dayVolume,
       };
-      const minuteRows = [...(minuteRowsByMarket.get(state.marketId) ?? [])];
-      const dayRows = [...(dayRowsByMarket.get(state.marketId) ?? [])];
+      // const minuteRows = Array.from(
+      //   ctx.db.marketMinuteCandle.marketId.filter(state.marketId)
+      // );
+      // const dayRows = Array.from(
+      //   ctx.db.marketDayCandle.marketId.filter(state.marketId)
+      // );
       const isSameMinuteBucket =
         previousMinuteRow.bucketStart.toMillis() === currentMinuteStart.toMillis();
       const isSameDayBucket = previousDayRow.bucketStart.toMillis() === currentDayStart.toMillis();
 
       let nextMinuteRow: CandleRow;
-      let updatedMinuteRows: CandleRow[];
+      // let updatedMinuteRows: CandleRow[];
 
       if (isSameMinuteBucket) {
         nextMinuteRow = {
@@ -707,10 +766,9 @@ export const tickMarkets = spacetimedb.reducer(
         };
         ctx.db.marketMinuteCandle.delete(previousMinuteRow);
         ctx.db.marketMinuteCandle.insert(nextMinuteRow);
-        updatedMinuteRows = minuteRows
-          .filter(row => row.id !== previousMinuteRow.id)
-          .concat(nextMinuteRow)
-          .sort(sortCandlesByTime);
+        // updatedMinuteRows = minuteRows.map(row =>
+        //   row.id === previousMinuteRow.id ? nextMinuteRow : row
+        // );
       } else {
         nextMinuteRow = {
           id: nextCandleId,
@@ -724,18 +782,18 @@ export const tickMarkets = spacetimedb.reducer(
         };
         nextCandleId += 1n;
         ctx.db.marketMinuteCandle.insert(nextMinuteRow);
-        updatedMinuteRows = minuteRows.concat(nextMinuteRow).sort(sortCandlesByTime);
+        // updatedMinuteRows = minuteRows.concat(nextMinuteRow);
 
-        while (updatedMinuteRows.length > MAX_MINUTE_CANDLES_PER_MARKET) {
-          const oldestRow = updatedMinuteRows.shift();
-          if (oldestRow) {
-            ctx.db.marketMinuteCandle.delete(oldestRow);
-          }
-        }
+        // while (updatedMinuteRows.length > MAX_MINUTE_CANDLES_PER_MARKET) {
+        //   const oldestRow = updatedMinuteRows.shift();
+        //   if (oldestRow) {
+        //     ctx.db.marketMinuteCandle.delete(oldestRow);
+        //   }
+        // }
       }
 
       let nextDayRow: CandleRow;
-      let updatedDayRows: CandleRow[];
+      // let updatedDayRows: CandleRow[];
 
       if (isSameDayBucket) {
         nextDayRow = {
@@ -747,10 +805,9 @@ export const tickMarkets = spacetimedb.reducer(
         };
         ctx.db.marketDayCandle.delete(previousDayRow);
         ctx.db.marketDayCandle.insert(nextDayRow);
-        updatedDayRows = dayRows
-          .filter(row => row.id !== previousDayRow.id)
-          .concat(nextDayRow)
-          .sort(sortCandlesByTime);
+        // updatedDayRows = dayRows.map(row =>
+        //   row.id === previousDayRow.id ? nextDayRow : row
+        // );
       } else {
         nextDayRow = {
           id: nextCandleId,
@@ -764,19 +821,19 @@ export const tickMarkets = spacetimedb.reducer(
         };
         nextCandleId += 1n;
         ctx.db.marketDayCandle.insert(nextDayRow);
-        updatedDayRows = dayRows.concat(nextDayRow).sort(sortCandlesByTime);
+        // updatedDayRows = dayRows.concat(nextDayRow);
 
-        while (updatedDayRows.length > MAX_DAY_CANDLES_PER_MARKET) {
-          const oldestRow = updatedDayRows.shift();
-          if (oldestRow) {
-            ctx.db.marketDayCandle.delete(oldestRow);
-          }
-        }
+        // while (updatedDayRows.length > MAX_DAY_CANDLES_PER_MARKET) {
+        //   const oldestRow = updatedDayRows.shift();
+        //   if (oldestRow) {
+        //     ctx.db.marketDayCandle.delete(oldestRow);
+        //   }
+        // }
       }
 
-      ctx.db.market.delete(marketRow);
-      ctx.db.market.insert(
-        summarizeMarket(marketSeed, updatedMinuteRows, now, arg.tickIntervalMs)
+      ctx.db.marketSnapshot.delete(snapshotRow);
+      ctx.db.marketSnapshot.insert(
+        summarizeMarketSnapshot(ctx, marketSeed, now)
       );
 
       ctx.db.marketState.delete(state);
@@ -806,6 +863,7 @@ export const tickMarkets = spacetimedb.reducer(
       id: simulator.id,
       nextCandleId,
     });
+
   }
 );
 

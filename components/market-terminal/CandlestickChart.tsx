@@ -9,14 +9,21 @@ import {
   type CandlestickData,
   type IChartApi,
   type ISeriesApi,
+  type LogicalRangeChangeEventHandler,
   type Time,
 } from 'lightweight-charts';
 
-import { CHART_HEIGHT, formatPrice } from '@/lib/market-terminal';
+import {
+  CHART_HEIGHT,
+  HISTORY_LOAD_THRESHOLD_BARS,
+  formatPrice,
+} from '@/lib/market-terminal';
 
 type CandlestickChartProps = {
   candles: CandlestickData[];
   precision: number;
+  canLoadMoreHistory?: boolean;
+  onRequestMoreHistory?: () => void;
 };
 
 function renderOverlayMarkup(candle: CandlestickData, precision: number, time: Time) {
@@ -39,28 +46,56 @@ function formatTooltipTime(time: Time) {
   }
 
   if (typeof time === 'number') {
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
+    const date = new Date(time * 1000);
+    const startDate = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
       timeZone: 'UTC',
-    }).format(new Date(time * 1000));
+    }).format(date);
+    const startHour = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'UTC',
+    }).format(date);
+
+    return `${startDate} ${startHour} UTC`;
   }
 
-  return `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}`;
+  return `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')} 00:00 UTC`;
 }
 
-export function CandlestickChart({ candles, precision }: CandlestickChartProps) {
+export function CandlestickChart({
+  candles,
+  precision,
+  canLoadMoreHistory = false,
+  onRequestMoreHistory,
+}: CandlestickChartProps) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const precisionRef = useRef(precision);
+  const canLoadMoreHistoryRef = useRef(canLoadMoreHistory);
+  const onRequestMoreHistoryRef = useRef(onRequestMoreHistory);
+  const historyRequestPendingRef = useRef(false);
 
   useEffect(() => {
     precisionRef.current = precision;
   }, [precision]);
+
+  useEffect(() => {
+    canLoadMoreHistoryRef.current = canLoadMoreHistory;
+  }, [canLoadMoreHistory]);
+
+  useEffect(() => {
+    onRequestMoreHistoryRef.current = onRequestMoreHistory;
+  }, [onRequestMoreHistory]);
+
+  useEffect(() => {
+    historyRequestPendingRef.current = false;
+  }, [candles.length]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -150,6 +185,29 @@ export function CandlestickChart({ candles, precision }: CandlestickChartProps) 
       overlay.innerHTML = renderOverlayMarkup(data, precisionRef.current, param.time);
     });
 
+    const handleVisibleLogicalRangeChange: LogicalRangeChangeEventHandler = logicalRange => {
+      const currentSeries = seriesRef.current;
+      if (
+        !logicalRange ||
+        !currentSeries ||
+        !canLoadMoreHistoryRef.current ||
+        historyRequestPendingRef.current ||
+        !onRequestMoreHistoryRef.current
+      ) {
+        return;
+      }
+
+      const barsInfo = currentSeries.barsInLogicalRange(logicalRange);
+
+      if (barsInfo && barsInfo.barsBefore < HISTORY_LOAD_THRESHOLD_BARS) {
+        console.log('logicalRange', logicalRange?.from);
+        historyRequestPendingRef.current = true;
+        onRequestMoreHistoryRef.current();
+      }
+    };
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
+
     const resizeObserver = new ResizeObserver(entries => {
       const entry = entries[0];
 
@@ -165,6 +223,7 @@ export function CandlestickChart({ candles, precision }: CandlestickChartProps) 
 
     return () => {
       resizeObserver.disconnect();
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
