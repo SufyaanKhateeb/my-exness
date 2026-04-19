@@ -137,8 +137,6 @@ export function LiveMarketChart({
         <>
             <ChartToolbar
                 isConnected={conn.isActive}
-                minuteCandleCount={selectedMinuteCandles.length}
-                dayCandleCount={selectedDayCandles.length}
                 hasLiveCandles={selectedCandles.length > 0}
                 intervalAmount={safeIntervalAmount}
                 intervalUnit={intervalUnit}
