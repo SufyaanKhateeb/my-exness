@@ -1,9 +1,9 @@
 'use client';
 
 import { getAccessToken, useUser } from '@auth0/nextjs-auth0/client';
-import { useEffect, useMemo, useState } from 'react';
-import { SpacetimeDBProvider } from 'spacetimedb/react';
-import { DbConnection, ErrorContext } from '../src/module_bindings';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { SpacetimeDBProvider, useReducer, useSpacetimeDB } from 'spacetimedb/react';
+import { DbConnection, ErrorContext, reducers } from '../src/module_bindings';
 import { Identity } from 'spacetimedb';
 
 const HOST =
@@ -31,6 +31,77 @@ const onConnectError = (_ctx: ErrorContext, err: Error) => {
   console.log('[spacetimedb-client] Error connecting to SpacetimeDB:', err);
 };
 
+type AuthenticatedUser = {
+  sub?: string;
+  name?: string | null;
+  email?: string | null;
+};
+
+function Auth0UserSync({
+  user,
+  children,
+}: {
+  user: AuthenticatedUser | undefined;
+  children: React.ReactNode;
+}) {
+  const { getConnection, isActive } = useSpacetimeDB();
+  const syncCurrentUser = useReducer(reducers.syncCurrentUser);
+  const lastCheckedUserIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function ensureCurrentUserSync() {
+      const conn = getConnection() as DbConnection | null;
+      const auth0UserId = user?.sub;
+
+      if (!conn || !auth0UserId) {
+        return;
+      }
+
+      if (lastCheckedUserIdRef.current === auth0UserId) {
+        return;
+      }
+
+      const exists = await conn.procedures.currentUserExists({});
+
+      if (cancelled) {
+        return;
+      }
+
+      if (!exists) {
+        await syncCurrentUser({
+          displayName: user?.name ?? '',
+          email: user?.email ?? '',
+        });
+
+        if (cancelled) {
+          return;
+        }
+      }
+
+      lastCheckedUserIdRef.current = auth0UserId;
+    }
+
+    if (!user?.sub) {
+      lastCheckedUserIdRef.current = null;
+      return;
+    }
+
+    if (!isActive) {
+      return;
+    }
+
+    void ensureCurrentUserSync();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getConnection, isActive, syncCurrentUser, user]);
+
+  return <>{children}</>;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useUser();
   const [auth0Token, setAuth0Token] = useState<string | null>(null);
@@ -51,8 +122,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
       try {
         const token = await getAccessToken({
-          // audience: AUTH0_AUDIENCE,
-          // scope: AUTH0_SCOPE || undefined,
+          audience: AUTH0_AUDIENCE,
+          scope: AUTH0_SCOPE || undefined,
         });
 
         if (!cancelled) {
@@ -114,7 +185,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       key={user ? `auth0:${connectionToken ?? 'missing-token'}` : 'anonymous'}
       connectionBuilder={connectionBuilder}
     >
-      {children}
+      <Auth0UserSync user={user ?? undefined}>{children}</Auth0UserSync>
     </SpacetimeDBProvider>
   );
 }

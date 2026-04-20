@@ -35,10 +35,16 @@ import {
 
 // Import all reducer arg schemas
 import AddReducer from "./add_reducer";
+import CancelOrderReducer from "./cancel_order_reducer";
+import PlaceLimitOrderReducer from "./place_limit_order_reducer";
+import PlaceMarketOrderReducer from "./place_market_order_reducer";
 import ResetSimulationReducer from "./reset_simulation_reducer";
 import SayHelloReducer from "./say_hello_reducer";
+import SyncCurrentUserReducer from "./sync_current_user_reducer";
 
 // Import all procedure arg schemas
+import * as CurrentUserCanTradeProcedure from "./current_user_can_trade_procedure";
+import * as CurrentUserExistsProcedure from "./current_user_exists_procedure";
 
 // Import all table schema definitions
 import MarketRow from "./market_table";
@@ -46,6 +52,9 @@ import MarketDayCandleRow from "./market_day_candle_table";
 import MarketMinuteCandleRow from "./market_minute_candle_table";
 import MarketOrderBookLevelRow from "./market_order_book_level_table";
 import MarketSnapshotRow from "./market_snapshot_table";
+import MyMarketOrdersRow from "./my_market_orders_table";
+import MyMarketPositionStateRow from "./my_market_position_state_table";
+import MyTradingAccountStateRow from "./my_trading_account_state_table";
 import PersonRow from "./person_table";
 
 /** Type-only namespace exports for generated type groups. */
@@ -141,17 +150,44 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, PersonRow),
+  myMarketOrders: __table({
+    name: 'my_market_orders',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyMarketOrdersRow),
+  myMarketPositionState: __table({
+    name: 'my_market_position_state',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyMarketPositionStateRow),
+  myTradingAccountState: __table({
+    name: 'my_trading_account_state',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyTradingAccountStateRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("add", AddReducer),
+  __reducerSchema("cancel_order", CancelOrderReducer),
+  __reducerSchema("place_limit_order", PlaceLimitOrderReducer),
+  __reducerSchema("place_market_order", PlaceMarketOrderReducer),
   __reducerSchema("reset_simulation", ResetSimulationReducer),
   __reducerSchema("say_hello", SayHelloReducer),
+  __reducerSchema("sync_current_user", SyncCurrentUserReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
 const proceduresSchema = __procedures(
+  __procedureSchema("current_user_can_trade", CurrentUserCanTradeProcedure.params, CurrentUserCanTradeProcedure.returnType),
+  __procedureSchema("current_user_exists", CurrentUserExistsProcedure.params, CurrentUserExistsProcedure.returnType),
 );
 
 /** The remote SpacetimeDB module schema, both runtime and type information. */

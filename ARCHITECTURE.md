@@ -210,4 +210,3 @@ Natural next steps:
 
 Add an order book and fake bid/ask depth per market.
 Add portfolio, positions, and order reducers so the terminal can simulate trading.
-Elect a single market-maker process instead of client-driven ticking if you want the feed to run independently of open browser tabs.

@@ -6,6 +6,8 @@ import {
 } from './simulator-config';
 import type { ExchangeCtx } from './index';
 
+type AuthenticatedContext = Pick<ExchangeCtx, 'senderAuth'>;
+
 function claimAsStringArray(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -22,7 +24,7 @@ function hasScopeClaim(value: unknown, scope: string) {
   return value.split(/\s+/).includes(scope);
 }
 
-function ensureAuth0Jwt(ctx: ExchangeCtx) {
+function ensureAuth0Jwt(ctx: AuthenticatedContext) {
   const senderAuth = ctx.senderAuth;
 
   if (senderAuth.isInternal) {
@@ -46,7 +48,7 @@ function ensureAuth0Jwt(ctx: ExchangeCtx) {
   return jwt;
 }
 
-function ensurePermission(ctx: ExchangeCtx, permission: string) {
+function ensurePermission(ctx: AuthenticatedContext, permission: string) {
   const jwt = ensureAuth0Jwt(ctx);
 
   if (!jwt) {
@@ -62,4 +64,15 @@ function ensurePermission(ctx: ExchangeCtx, permission: string) {
   throw new SenderError(`Permission \"${permission}\" is required.`);
 }
 
-export { ensureAuth0Jwt, ensurePermission };
+function getCurrentAuth0UserId(ctx: AuthenticatedContext) {
+  const jwt = ensureAuth0Jwt(ctx);
+  const subject = jwt?.fullPayload?.sub;
+
+  if (typeof subject !== 'string' || subject.length === 0) {
+    throw new SenderError('Authenticated Auth0 subject claim is missing.');
+  }
+
+  return subject;
+}
+
+export { ensureAuth0Jwt, ensurePermission, getCurrentAuth0UserId };

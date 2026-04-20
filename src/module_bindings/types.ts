@@ -58,6 +58,34 @@ export const MarketOrderBookLevel = __t.object("MarketOrderBookLevel", {
 });
 export type MarketOrderBookLevel = __Infer<typeof MarketOrderBookLevel>;
 
+export const MarketOrderState = __t.object("MarketOrderState", {
+  id: __t.u64(),
+  marketId: __t.u32(),
+  side: __t.string(),
+  orderType: __t.string(),
+  status: __t.string(),
+  quantity: __t.f64(),
+  limitPrice: __t.option(__t.f64()),
+  filledPrice: __t.option(__t.f64()),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+  filledAt: __t.option(__t.timestamp()),
+});
+export type MarketOrderState = __Infer<typeof MarketOrderState>;
+
+export const MarketPositionState = __t.object("MarketPositionState", {
+  marketId: __t.u32(),
+  quantity: __t.f64(),
+  reservedQuantity: __t.f64(),
+  availableQuantity: __t.f64(),
+  averageEntryPrice: __t.f64(),
+  markPrice: __t.f64(),
+  marketValue: __t.f64(),
+  unrealizedPnl: __t.f64(),
+  updatedAt: __t.timestamp(),
+});
+export type MarketPositionState = __Infer<typeof MarketPositionState>;
+
 export const MarketSnapshot = __t.object("MarketSnapshot", {
   marketId: __t.u32(),
   price: __t.f64(),
@@ -98,6 +126,15 @@ export const MarketTickSchedule = __t.object("MarketTickSchedule", {
 });
 export type MarketTickSchedule = __Infer<typeof MarketTickSchedule>;
 
+export const MyMarketOrders = __t.object("MyMarketOrders", {});
+export type MyMarketOrders = __Infer<typeof MyMarketOrders>;
+
+export const MyMarketPositionState = __t.object("MyMarketPositionState", {});
+export type MyMarketPositionState = __Infer<typeof MyMarketPositionState>;
+
+export const MyTradingAccountState = __t.object("MyTradingAccountState", {});
+export type MyTradingAccountState = __Infer<typeof MyTradingAccountState>;
+
 export const Person = __t.object("Person", {
   name: __t.string(),
 });
@@ -108,4 +145,62 @@ export const SimulatorState = __t.object("SimulatorState", {
   nextCandleId: __t.u64(),
 });
 export type SimulatorState = __Infer<typeof SimulatorState>;
+
+export const TradeOrder = __t.object("TradeOrder", {
+  id: __t.u64(),
+  auth0UserId: __t.string(),
+  marketId: __t.u32(),
+  side: __t.string(),
+  orderType: __t.string(),
+  status: __t.string(),
+  quantity: __t.f64(),
+  limitPrice: __t.option(__t.f64()),
+  filledPrice: __t.option(__t.f64()),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+  filledAt: __t.option(__t.timestamp()),
+});
+export type TradeOrder = __Infer<typeof TradeOrder>;
+
+export const TradingAccount = __t.object("TradingAccount", {
+  auth0UserId: __t.string(),
+  currency: __t.string(),
+  balance: __t.f64(),
+  reservedBalance: __t.f64(),
+  updatedAt: __t.timestamp(),
+});
+export type TradingAccount = __Infer<typeof TradingAccount>;
+
+export const TradingAccountState = __t.object("TradingAccountState", {
+  auth0UserId: __t.string(),
+  currency: __t.string(),
+  balance: __t.f64(),
+  reservedBalance: __t.f64(),
+  availableBalance: __t.f64(),
+  unrealizedPnl: __t.f64(),
+  netLiquidationValue: __t.f64(),
+  updatedAt: __t.timestamp(),
+});
+export type TradingAccountState = __Infer<typeof TradingAccountState>;
+
+export const TradingPosition = __t.object("TradingPosition", {
+  id: __t.string(),
+  auth0UserId: __t.string(),
+  marketId: __t.u32(),
+  quantity: __t.f64(),
+  reservedQuantity: __t.f64(),
+  averageEntryPrice: __t.f64(),
+  updatedAt: __t.timestamp(),
+});
+export type TradingPosition = __Infer<typeof TradingPosition>;
+
+export const UserProfile = __t.object("UserProfile", {
+  auth0UserId: __t.string(),
+  senderIdentity: __t.identity(),
+  displayName: __t.string(),
+  email: __t.string(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type UserProfile = __Infer<typeof UserProfile>;
 

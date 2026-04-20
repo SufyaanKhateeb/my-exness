@@ -1,7 +1,17 @@
 import { ScheduleAt } from 'spacetimedb';
-import { schema, table, t, type ReducerCtx } from 'spacetimedb/server';
+import {
+  SenderError,
+  schema,
+  table,
+  t,
+  type Infer,
+  type ReducerCtx,
+  type ViewCtx,
+} from 'spacetimedb/server';
 
 import {
+  DEFAULT_ACCOUNT_BALANCE,
+  DEFAULT_ACCOUNT_CURRENCY,
   MINUTE_HISTORY_COUNT,
   MS_PER_MINUTE,
   QUOTE_INTERVAL_MS,
@@ -10,7 +20,7 @@ import {
   SEED_MARKETS_BY_ID,
 } from './simulator-config';
 import type { CandleRow } from './simulator-config';
-import { ensureAuth0Jwt, ensurePermission } from './simulator-auth';
+import { ensureAuth0Jwt, ensurePermission, getCurrentAuth0UserId } from './simulator-auth';
 import {
   buildOrderBookLevels,
   buildDayCandlesFromMinuteHistory,
@@ -38,12 +48,124 @@ const marketTickSchedule = table(
   marketTickScheduleRow
 );
 
+const ORDER_SIDE_BUY = 'buy';
+const ORDER_SIDE_SELL = 'sell';
+const ORDER_TYPE_MARKET = 'market';
+const ORDER_TYPE_LIMIT = 'limit';
+const ORDER_STATUS_OPEN = 'open';
+const ORDER_STATUS_FILLED = 'filled';
+const ORDER_STATUS_CANCELLED = 'cancelled';
+const POSITION_EPSILON = 1e-9;
+
+const tradingAccountStateRow = t.row('TradingAccountState', {
+  auth0UserId: t.string(),
+  currency: t.string(),
+  balance: t.f64(),
+  reservedBalance: t.f64(),
+  availableBalance: t.f64(),
+  unrealizedPnl: t.f64(),
+  netLiquidationValue: t.f64(),
+  updatedAt: t.timestamp(),
+});
+
+const marketPositionStateRow = t.row('MarketPositionState', {
+  marketId: t.u32(),
+  quantity: t.f64(),
+  reservedQuantity: t.f64(),
+  availableQuantity: t.f64(),
+  averageEntryPrice: t.f64(),
+  markPrice: t.f64(),
+  marketValue: t.f64(),
+  unrealizedPnl: t.f64(),
+  updatedAt: t.timestamp(),
+});
+
+const marketOrderStateRow = t.row('MarketOrderState', {
+  id: t.u64(),
+  marketId: t.u32(),
+  side: t.string(),
+  orderType: t.string(),
+  status: t.string(),
+  quantity: t.f64(),
+  limitPrice: t.option(t.f64()),
+  filledPrice: t.option(t.f64()),
+  createdAt: t.timestamp(),
+  updatedAt: t.timestamp(),
+  filledAt: t.option(t.timestamp()),
+});
+
+const userProfileRow = t.row('UserProfile', {
+  auth0UserId: t.string().primaryKey(),
+  senderIdentity: t.identity().unique(),
+  displayName: t.string(),
+  email: t.string(),
+  createdAt: t.timestamp(),
+  updatedAt: t.timestamp(),
+});
+
+const tradingAccountRow = t.row('TradingAccount', {
+  auth0UserId: t.string().primaryKey(),
+  currency: t.string(),
+  balance: t.f64(),
+  reservedBalance: t.f64(),
+  updatedAt: t.timestamp(),
+});
+
+const tradingPositionRow = t.row('TradingPosition', {
+  id: t.string().primaryKey(),
+  auth0UserId: t.string().index(),
+  marketId: t.u32().index(),
+  quantity: t.f64(),
+  reservedQuantity: t.f64(),
+  averageEntryPrice: t.f64(),
+  updatedAt: t.timestamp(),
+});
+
+const tradeOrderRow = t.row('TradeOrder', {
+  id: t.u64().primaryKey().autoInc(),
+  auth0UserId: t.string().index(),
+  marketId: t.u32().index(),
+  side: t.string(),
+  orderType: t.string(),
+  status: t.string().index(),
+  quantity: t.f64(),
+  limitPrice: t.option(t.f64()),
+  filledPrice: t.option(t.f64()),
+  createdAt: t.timestamp(),
+  updatedAt: t.timestamp(),
+  filledAt: t.option(t.timestamp()),
+});
+
 const spacetimedb = schema({
   person: table(
     { public: true },
     {
       name: t.string(),
     }
+  ),
+  userProfile: table(
+    {
+      name: 'user_profile',
+    },
+    userProfileRow
+  ),
+  tradingAccount: table(
+    {
+      name: 'trading_account',
+    },
+    tradingAccountRow
+  ),
+  tradingPosition: table(
+    {
+      name: 'trading_position',
+    },
+    tradingPositionRow
+  ),
+  tradeOrder: table(
+    {
+      name: 'trade_order',
+    },
+    tradeOrderRow
   ),
   market: table(
     { public: true },
@@ -157,15 +279,410 @@ const spacetimedb = schema({
 export default spacetimedb;
 
 export type ExchangeCtx = ReducerCtx<typeof spacetimedb.schemaType>;
+type ExchangeViewCtx = ViewCtx<typeof spacetimedb.schemaType>;
+type TradingReadCtx = { db: ExchangeCtx['db'] | ExchangeViewCtx['db'] };
+type TradingAccountRowType = Infer<typeof tradingAccountRow>;
+type TradingPositionRowType = Infer<typeof tradingPositionRow>;
+type TradeOrderRowType = Infer<typeof tradeOrderRow>;
+
+function normalizeQuantity(value: number) {
+  return Math.abs(value) < POSITION_EPSILON ? 0 : value;
+}
+
+function requirePositiveQuantity(quantity: number) {
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new SenderError('Quantity must be greater than zero.');
+  }
+}
+
+function requirePositivePrice(price: number) {
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new SenderError('Price must be greater than zero.');
+  }
+}
+
+function getPositionId(auth0UserId: string, marketId: number) {
+  return `${auth0UserId}:${marketId}`;
+}
+
+function getAvailableBalance(account: { balance: number; reservedBalance: number }) {
+  return account.balance - account.reservedBalance;
+}
+
+function getAvailablePositionQuantity(position: { quantity: number; reservedQuantity: number } | null) {
+  if (!position) {
+    return 0;
+  }
+
+  return position.quantity - position.reservedQuantity;
+}
+
+function ensureTradingAccount(ctx: TradingReadCtx, auth0UserId: string) {
+  const account = ctx.db.tradingAccount.auth0UserId.find(auth0UserId) as
+    | TradingAccountRowType
+    | undefined;
+
+  if (!account) {
+    throw new SenderError('Trading account not found. Sync the current user first.');
+  }
+
+  return account;
+}
+
+function ensureTradingResourceAccess(ctx: ExchangeCtx) {
+  ensureAuth0Jwt(ctx);
+
+  const auth0UserId = getCurrentAuth0UserId(ctx);
+  const profile = ctx.db.userProfile.auth0UserId.find(auth0UserId);
+
+  if (!profile) {
+    throw new SenderError('User profile not found. Sync the current user first.');
+  }
+
+  return {
+    auth0UserId,
+    profile,
+    account: ensureTradingAccount(ctx, auth0UserId),
+  };
+}
+
+function getAuth0UserIdBySenderIdentity(
+  ctx: TradingReadCtx,
+  senderIdentity: ExchangeCtx['sender']
+) {
+  return ctx.db.userProfile.senderIdentity.find(senderIdentity)?.auth0UserId;
+}
+
+function ensureMarketSnapshot(ctx: ExchangeCtx, marketId: number) {
+  const snapshot = ctx.db.marketSnapshot.marketId.find(marketId);
+
+  if (!snapshot) {
+    throw new SenderError('Market snapshot not found.');
+  }
+
+  return snapshot;
+}
+
+function computeTradingAccountState(ctx: TradingReadCtx, auth0UserId: string) {
+  const account = ensureTradingAccount(ctx, auth0UserId);
+  let unrealizedPnl = 0;
+  let netLiquidationValue = account.balance;
+  const positions = Array.from(
+    ctx.db.tradingPosition.auth0UserId.filter(auth0UserId)
+  ) as TradingPositionRowType[];
+
+  for (const position of positions) {
+    const snapshot = ctx.db.marketSnapshot.marketId.find(position.marketId);
+
+    if (!snapshot) {
+      continue;
+    }
+
+    const positionUnrealizedPnl = position.quantity * (snapshot.price - position.averageEntryPrice);
+    unrealizedPnl += positionUnrealizedPnl;
+    netLiquidationValue += position.quantity * snapshot.price;
+  }
+
+  return {
+    auth0UserId,
+    currency: account.currency,
+    balance: account.balance,
+    reservedBalance: account.reservedBalance,
+    availableBalance: getAvailableBalance(account),
+    unrealizedPnl,
+    netLiquidationValue,
+    updatedAt: account.updatedAt,
+  };
+}
+
+function computeMarketPositionState(ctx: TradingReadCtx, auth0UserId: string, marketId: number) {
+  const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
+
+  if (!position) {
+    return undefined;
+  }
+
+  const snapshot = ctx.db.marketSnapshot.marketId.find(marketId);
+  const markPrice = snapshot?.price ?? position.averageEntryPrice;
+  const marketValue = position.quantity * markPrice;
+  const unrealizedPnl = position.quantity * (markPrice - position.averageEntryPrice);
+
+  return {
+    marketId,
+    quantity: position.quantity,
+    reservedQuantity: position.reservedQuantity,
+    availableQuantity: getAvailablePositionQuantity(position),
+    averageEntryPrice: position.averageEntryPrice,
+    markPrice,
+    marketValue,
+    unrealizedPnl,
+    updatedAt: position.updatedAt,
+  };
+}
+
+function listMarketPositionStateRows(ctx: TradingReadCtx, auth0UserId: string) {
+  return (Array.from(ctx.db.tradingPosition.auth0UserId.filter(auth0UserId)) as TradingPositionRowType[])
+    .map(position => computeMarketPositionState(ctx, auth0UserId, position.marketId))
+    .filter(position => position !== undefined);
+}
+
+function listMarketOrderStateRows(ctx: TradingReadCtx, auth0UserId: string) {
+  return (Array.from(ctx.db.tradeOrder.auth0UserId.filter(auth0UserId)) as TradeOrderRowType[])
+    .sort((left, right) => Number(right.updatedAt.toMillis() - left.updatedAt.toMillis()))
+    .map(order => ({
+      id: order.id,
+      marketId: order.marketId,
+      side: order.side,
+      orderType: order.orderType,
+      status: order.status,
+      quantity: order.quantity,
+      limitPrice: order.limitPrice,
+      filledPrice: order.filledPrice,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      filledAt: order.filledAt,
+    }));
+}
+
+function executeAgainstOrderBook(
+  ctx: ExchangeCtx,
+  marketId: number,
+  side: string,
+  quantity: number,
+  limitPrice: number | undefined,
+  executedAt: ExchangeCtx['timestamp']
+) {
+  const opposingLevels = Array.from(ctx.db.marketOrderBookLevel.marketId.filter(marketId))
+    .filter(level => side === ORDER_SIDE_BUY ? !level.isBid : level.isBid)
+    .filter(level => {
+      if (limitPrice == null) {
+        return true;
+      }
+
+      return side === ORDER_SIDE_BUY
+        ? level.price <= limitPrice + POSITION_EPSILON
+        : level.price >= limitPrice - POSITION_EPSILON;
+    })
+    .sort((left, right) => {
+      if (side === ORDER_SIDE_BUY) {
+        return left.price === right.price ? left.level - right.level : left.price - right.price;
+      }
+
+      return left.price === right.price ? left.level - right.level : right.price - left.price;
+    });
+
+  let remainingQuantity = quantity;
+  let totalNotional = 0;
+  const fills: Array<{ level: typeof opposingLevels[number]; filledSize: number }> = [];
+
+  for (const level of opposingLevels) {
+    if (remainingQuantity <= POSITION_EPSILON) {
+      break;
+    }
+
+    const filledSize = Math.min(remainingQuantity, level.size);
+
+    if (filledSize <= POSITION_EPSILON) {
+      continue;
+    }
+
+    fills.push({ level, filledSize });
+    totalNotional += filledSize * level.price;
+    remainingQuantity -= filledSize;
+  }
+
+  if (remainingQuantity > POSITION_EPSILON) {
+    return null;
+  }
+
+  for (const fill of fills) {
+    const nextSize = fill.level.size - fill.filledSize;
+
+    if (nextSize <= POSITION_EPSILON) {
+      ctx.db.marketOrderBookLevel.delete(fill.level);
+      continue;
+    }
+
+    fill.level.size = nextSize;
+    fill.level.updatedAt = executedAt;
+    ctx.db.marketOrderBookLevel.id.update(fill.level);
+  }
+
+  return {
+    averageFillPrice: totalNotional / quantity,
+  };
+}
+
+function upsertTradingPosition(
+  ctx: ExchangeCtx,
+  auth0UserId: string,
+  marketId: number,
+  nextQuantity: number,
+  reservedQuantity: number,
+  averageEntryPrice: number,
+  updatedAt: ExchangeCtx['timestamp']
+) {
+  const positionId = getPositionId(auth0UserId, marketId);
+  const normalizedQuantity = normalizeQuantity(nextQuantity);
+  const normalizedReservedQuantity = normalizeQuantity(reservedQuantity);
+  const existingPosition = ctx.db.tradingPosition.id.find(positionId);
+
+  if (normalizedQuantity === 0 && normalizedReservedQuantity === 0) {
+    if (existingPosition) {
+      ctx.db.tradingPosition.delete(existingPosition);
+    }
+    return null;
+  }
+
+  if (existingPosition) {
+    existingPosition.quantity = normalizedQuantity;
+    existingPosition.reservedQuantity = normalizedReservedQuantity;
+    existingPosition.averageEntryPrice = normalizedQuantity === 0 ? 0 : averageEntryPrice;
+    existingPosition.updatedAt = updatedAt;
+    ctx.db.tradingPosition.id.update(existingPosition);
+    return existingPosition;
+  }
+
+  return ctx.db.tradingPosition.insert({
+    id: positionId,
+    auth0UserId,
+    marketId,
+    quantity: normalizedQuantity,
+    reservedQuantity: normalizedReservedQuantity,
+    averageEntryPrice: normalizedQuantity === 0 ? 0 : averageEntryPrice,
+    updatedAt,
+  });
+}
+
+function fillTradeOrder(
+  ctx: ExchangeCtx,
+  orderId: bigint,
+  fillPrice: number,
+  filledAt: ExchangeCtx['timestamp']
+) {
+  const order = ctx.db.tradeOrder.id.find(orderId);
+
+  if (!order) {
+    return;
+  }
+
+  if (order.status !== ORDER_STATUS_OPEN) {
+    return;
+  }
+
+  const account = ensureTradingAccount(ctx, order.auth0UserId);
+  const notional = order.quantity * fillPrice;
+  const positionId = getPositionId(order.auth0UserId, order.marketId);
+  const existingPosition = ctx.db.tradingPosition.id.find(positionId);
+
+  if (order.side === ORDER_SIDE_BUY) {
+    const reservedNotional = order.orderType === ORDER_TYPE_LIMIT
+      ? order.quantity * (order.limitPrice ?? fillPrice)
+      : 0;
+
+    if (order.orderType === ORDER_TYPE_MARKET && getAvailableBalance(account) + POSITION_EPSILON < notional) {
+      throw new SenderError('Insufficient available balance for this market order.');
+    }
+
+    if (order.orderType === ORDER_TYPE_LIMIT && account.reservedBalance + POSITION_EPSILON < reservedNotional) {
+      throw new SenderError('Reserved balance is insufficient to fill this limit order.');
+    }
+
+    account.balance -= notional;
+    account.reservedBalance = Math.max(0, account.reservedBalance - reservedNotional);
+    account.updatedAt = filledAt;
+    ctx.db.tradingAccount.auth0UserId.update(account);
+
+    const currentQuantity = existingPosition?.quantity ?? 0;
+    const nextQuantity = currentQuantity + order.quantity;
+    const currentCostBasis = currentQuantity * (existingPosition?.averageEntryPrice ?? 0);
+    const nextAverageEntryPrice = nextQuantity > 0
+      ? (currentCostBasis + notional) / nextQuantity
+      : 0;
+
+    upsertTradingPosition(
+      ctx,
+      order.auth0UserId,
+      order.marketId,
+      nextQuantity,
+      existingPosition?.reservedQuantity ?? 0,
+      nextAverageEntryPrice,
+      filledAt
+    );
+  } else {
+    if (!existingPosition || existingPosition.quantity + POSITION_EPSILON < order.quantity) {
+      throw new SenderError('Insufficient position quantity for this sell order.');
+    }
+
+    if (order.orderType === ORDER_TYPE_LIMIT && existingPosition.reservedQuantity + POSITION_EPSILON < order.quantity) {
+      throw new SenderError('Reserved position quantity is insufficient to fill this limit order.');
+    }
+
+    account.balance += notional;
+    account.updatedAt = filledAt;
+    ctx.db.tradingAccount.auth0UserId.update(account);
+
+    const nextQuantity = existingPosition.quantity - order.quantity;
+    const nextReservedQuantity = order.orderType === ORDER_TYPE_LIMIT
+      ? existingPosition.reservedQuantity - order.quantity
+      : existingPosition.reservedQuantity;
+
+    upsertTradingPosition(
+      ctx,
+      order.auth0UserId,
+      order.marketId,
+      nextQuantity,
+      nextReservedQuantity,
+      nextQuantity > 0 ? existingPosition.averageEntryPrice : 0,
+      filledAt
+    );
+  }
+
+  order.status = ORDER_STATUS_FILLED;
+  order.filledPrice = fillPrice;
+  order.filledAt = filledAt;
+  order.updatedAt = filledAt;
+  ctx.db.tradeOrder.id.update(order);
+}
+
+function maybeFillOpenLimitOrders(ctx: ExchangeCtx, marketId: number, fillPrice: number, filledAt: ExchangeCtx['timestamp']) {
+  const openOrders = Array.from(ctx.db.tradeOrder.marketId.filter(marketId))
+    .filter(order => order.orderType === ORDER_TYPE_LIMIT && order.status === ORDER_STATUS_OPEN)
+    .sort((left, right) => {
+      const createdAtDiff = Number(left.createdAt.toMillis() - right.createdAt.toMillis());
+      return createdAtDiff !== 0 ? createdAtDiff : Number(left.id - right.id);
+    });
+
+  for (const order of openOrders) {
+    const limitPrice = order.limitPrice;
+
+    if (limitPrice == null) {
+      continue;
+    }
+
+    const execution = executeAgainstOrderBook(
+      ctx,
+      marketId,
+      order.side,
+      order.quantity,
+      limitPrice,
+      filledAt
+    );
+
+    if (execution) {
+      fillTradeOrder(ctx, order.id, execution.averageFillPrice, filledAt);
+    }
+  }
+}
 
 function seedSimulator(ctx: ExchangeCtx) {
   if (
-    ctx.db.market.count() > 0n ||
-    ctx.db.marketSnapshot.count() > 0n ||
-    ctx.db.marketOrderBookLevel.count() > 0n ||
-    ctx.db.marketState.count() > 0n ||
-    ctx.db.marketTickSchedule.count() > 0n ||
-    ctx.db.simulatorState.count() > 0n
+    ctx.db.market.count() > BigInt(0) ||
+    ctx.db.marketSnapshot.count() > BigInt(0) ||
+    ctx.db.marketOrderBookLevel.count() > BigInt(0) ||
+    ctx.db.marketState.count() > BigInt(0) ||
+    ctx.db.marketTickSchedule.count() > BigInt(0) ||
+    ctx.db.simulatorState.count() > BigInt(0)
   ) {
     return;
   }
@@ -174,10 +691,10 @@ function seedSimulator(ctx: ExchangeCtx) {
   const currentMinuteStart = floorToMinute(now);
   const currentDayStart = floorToDay(now);
   const currentMinuteStartMillis = Number(currentMinuteStart.toMillis());
-  let nextCandleId = 1n;
+  let nextCandleId = BigInt(1);
 
   for (const market of SEED_MARKETS) {
-    let minuteSeed = BigInt(market.id) * 7919n;
+    let minuteSeed = BigInt(market.id) * BigInt(7919);
     let minuteClosePrice = market.basePrice;
     const reverseMinuteRows: CandleRow[] = [];
 
@@ -192,7 +709,7 @@ function seedSimulator(ctx: ExchangeCtx) {
         1.15
       );
       reverseMinuteRows.push(next.candle);
-      nextCandleId += 1n;
+      nextCandleId += BigInt(1);
       minuteSeed = next.seed;
       minuteClosePrice = next.candle.open;
     }
@@ -270,8 +787,8 @@ function seedSimulator(ctx: ExchangeCtx) {
   });
 
   ctx.db.marketTickSchedule.insert({
-    scheduled_id: 0n,
-    scheduled_at: ScheduleAt.interval(BigInt(QUOTE_INTERVAL_MS) * 1000n),
+    scheduled_id: BigInt(0),
+    scheduled_at: ScheduleAt.interval(BigInt(QUOTE_INTERVAL_MS) * BigInt(1000)),
     tickIntervalMs: QUOTE_INTERVAL_MS,
   });
 }
@@ -282,12 +799,12 @@ export const init = spacetimedb.init(ctx => {
 
 export const onConnect = spacetimedb.clientConnected(ctx => {
   if (
-    ctx.db.market.count() === 0n ||
-    ctx.db.marketSnapshot.count() === 0n ||
-    ctx.db.marketOrderBookLevel.count() === 0n ||
-    ctx.db.marketState.count() === 0n ||
-    ctx.db.marketTickSchedule.count() === 0n ||
-    ctx.db.simulatorState.count() === 0n
+    ctx.db.market.count() === BigInt(0) ||
+    ctx.db.marketSnapshot.count() === BigInt(0) ||
+    ctx.db.marketOrderBookLevel.count() === BigInt(0) ||
+    ctx.db.marketState.count() === BigInt(0) ||
+    ctx.db.marketTickSchedule.count() === BigInt(0) ||
+    ctx.db.simulatorState.count() === BigInt(0)
   ) {
     seedSimulator(ctx);
   }
@@ -306,6 +823,263 @@ export const add = spacetimedb.reducer(
   (ctx, { name }) => {
     ensureAuth0Jwt(ctx);
     ctx.db.person.insert({ name });
+  }
+);
+
+export const currentUserExists = spacetimedb.procedure(t.bool(), ctx => {
+  return ctx.withTx(txCtx => {
+    const auth0UserId = getCurrentAuth0UserId(txCtx);
+    return Boolean(txCtx.db.userProfile.auth0UserId.find(auth0UserId));
+  });
+});
+
+export const currentUserCanTrade = spacetimedb.procedure(t.bool(), ctx => {
+  return ctx.withTx(txCtx => {
+    try {
+      ensureTradingResourceAccess(txCtx);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+});
+
+export const myTradingAccountState = spacetimedb.view(
+  { name: 'my_trading_account_state', public: true },
+  t.option(tradingAccountStateRow),
+  ctx => {
+    const auth0UserId = getAuth0UserIdBySenderIdentity(ctx, ctx.sender);
+
+    if (!auth0UserId) {
+      return undefined;
+    }
+
+    return computeTradingAccountState(ctx, auth0UserId);
+  }
+);
+
+export const myMarketPositionState = spacetimedb.view(
+  { name: 'my_market_position_state', public: true },
+  t.array(marketPositionStateRow),
+  ctx => {
+    const auth0UserId = getAuth0UserIdBySenderIdentity(ctx, ctx.sender);
+    return auth0UserId ? listMarketPositionStateRows(ctx, auth0UserId) : [];
+  }
+);
+
+export const myMarketOrders = spacetimedb.view(
+  { name: 'my_market_orders', public: true },
+  t.array(marketOrderStateRow),
+  ctx => {
+    const auth0UserId = getAuth0UserIdBySenderIdentity(ctx, ctx.sender);
+    return auth0UserId ? listMarketOrderStateRows(ctx, auth0UserId) : [];
+  }
+);
+
+export const syncCurrentUser = spacetimedb.reducer(
+  {
+    displayName: t.string(),
+    email: t.string(),
+  },
+  (ctx, { displayName, email }) => {
+    const auth0UserId = getCurrentAuth0UserId(ctx);
+    const now = ctx.timestamp;
+    const normalizedDisplayName = displayName.trim() || auth0UserId;
+    const normalizedEmail = email.trim();
+
+    const existingProfile = ctx.db.userProfile.auth0UserId.find(auth0UserId);
+
+    if (existingProfile) {
+      existingProfile.senderIdentity = ctx.sender;
+      existingProfile.displayName = normalizedDisplayName;
+      existingProfile.email = normalizedEmail;
+      existingProfile.updatedAt = now;
+      ctx.db.userProfile.auth0UserId.update(existingProfile);
+    } else {
+      ctx.db.userProfile.insert({
+        auth0UserId,
+        senderIdentity: ctx.sender,
+        displayName: normalizedDisplayName,
+        email: normalizedEmail,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const existingAccount = ctx.db.tradingAccount.auth0UserId.find(auth0UserId);
+
+    if (existingAccount) {
+      existingAccount.updatedAt = now;
+      ctx.db.tradingAccount.auth0UserId.update(existingAccount);
+
+      return;
+    }
+
+    ctx.db.tradingAccount.insert({
+      auth0UserId,
+      currency: DEFAULT_ACCOUNT_CURRENCY,
+      balance: DEFAULT_ACCOUNT_BALANCE,
+      reservedBalance: 0,
+      updatedAt: now,
+    });
+  }
+);
+
+export const placeMarketOrder = spacetimedb.reducer(
+  {
+    marketId: t.u32(),
+    side: t.string(),
+    quantity: t.f64(),
+  },
+  (ctx, { marketId, side, quantity }) => {
+    const { auth0UserId, account } = ensureTradingResourceAccess(ctx);
+    requirePositiveQuantity(quantity);
+    ensureMarketSnapshot(ctx, marketId);
+
+    if (side !== ORDER_SIDE_BUY && side !== ORDER_SIDE_SELL) {
+      throw new SenderError('Unsupported order side.');
+    }
+
+    const now = ctx.timestamp;
+    const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
+    const execution = executeAgainstOrderBook(ctx, marketId, side, quantity, undefined, now);
+
+    if (!execution) {
+      throw new SenderError('Insufficient order book size to execute this market order.');
+    }
+
+    const notional = quantity * execution.averageFillPrice;
+
+    if (side === ORDER_SIDE_BUY && getAvailableBalance(account) + POSITION_EPSILON < notional) {
+      throw new SenderError('Insufficient available balance.');
+    }
+
+    if (side === ORDER_SIDE_SELL && getAvailablePositionQuantity(position) + POSITION_EPSILON < quantity) {
+      throw new SenderError('Insufficient available position quantity.');
+    }
+
+    const order = ctx.db.tradeOrder.insert({
+      id: BigInt(0),
+      auth0UserId,
+      marketId,
+      side,
+      orderType: ORDER_TYPE_MARKET,
+      status: ORDER_STATUS_OPEN,
+      quantity,
+      limitPrice: undefined,
+      filledPrice: undefined,
+      createdAt: now,
+      updatedAt: now,
+      filledAt: undefined,
+    });
+
+    fillTradeOrder(ctx, order.id, execution.averageFillPrice, now);
+  }
+);
+
+export const placeLimitOrder = spacetimedb.reducer(
+  {
+    marketId: t.u32(),
+    side: t.string(),
+    quantity: t.f64(),
+    limitPrice: t.f64(),
+  },
+  (ctx, { marketId, side, quantity, limitPrice }) => {
+    const { auth0UserId, account } = ensureTradingResourceAccess(ctx);
+    requirePositiveQuantity(quantity);
+    requirePositivePrice(limitPrice);
+    ensureMarketSnapshot(ctx, marketId);
+
+    if (side !== ORDER_SIDE_BUY && side !== ORDER_SIDE_SELL) {
+      throw new SenderError('Unsupported order side.');
+    }
+
+    const now = ctx.timestamp;
+    const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
+
+    if (side === ORDER_SIDE_BUY) {
+      const reserveAmount = quantity * limitPrice;
+
+      if (getAvailableBalance(account) + POSITION_EPSILON < reserveAmount) {
+        throw new SenderError('Insufficient available balance to place this limit order.');
+      }
+
+      account.reservedBalance += reserveAmount;
+      account.updatedAt = now;
+      ctx.db.tradingAccount.auth0UserId.update(account);
+    } else {
+      if (getAvailablePositionQuantity(position) + POSITION_EPSILON < quantity) {
+        throw new SenderError('Insufficient available position quantity to place this limit order.');
+      }
+
+      if (!position) {
+        throw new SenderError('No position is available for this sell limit order.');
+      }
+
+      position.reservedQuantity += quantity;
+      position.updatedAt = now;
+      ctx.db.tradingPosition.id.update(position);
+    }
+
+    const order = ctx.db.tradeOrder.insert({
+      id: BigInt(0),
+      auth0UserId,
+      marketId,
+      side,
+      orderType: ORDER_TYPE_LIMIT,
+      status: ORDER_STATUS_OPEN,
+      quantity,
+      limitPrice,
+      filledPrice: undefined,
+      createdAt: now,
+      updatedAt: now,
+      filledAt: undefined,
+    });
+
+    const execution = executeAgainstOrderBook(ctx, marketId, side, quantity, limitPrice, now);
+
+    if (execution) {
+      fillTradeOrder(ctx, order.id, execution.averageFillPrice, now);
+    }
+  }
+);
+
+export const cancelOrder = spacetimedb.reducer(
+  { orderId: t.u64() },
+  (ctx, { orderId }) => {
+    const { auth0UserId } = ensureTradingResourceAccess(ctx);
+    const order = ctx.db.tradeOrder.id.find(orderId);
+
+    if (!order || order.auth0UserId !== auth0UserId) {
+      throw new SenderError('Order not found.');
+    }
+
+    if (order.status !== ORDER_STATUS_OPEN) {
+      throw new SenderError('Only open orders can be cancelled.');
+    }
+
+    const now = ctx.timestamp;
+
+    if (order.orderType === ORDER_TYPE_LIMIT) {
+      if (order.side === ORDER_SIDE_BUY) {
+        const account = ensureTradingAccount(ctx, auth0UserId);
+        account.reservedBalance = Math.max(0, account.reservedBalance - order.quantity * (order.limitPrice ?? 0));
+        account.updatedAt = now;
+        ctx.db.tradingAccount.auth0UserId.update(account);
+      } else {
+        const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, order.marketId));
+
+        if (position) {
+          position.reservedQuantity = Math.max(0, position.reservedQuantity - order.quantity);
+          position.updatedAt = now;
+          ctx.db.tradingPosition.id.update(position);
+        }
+      }
+    }
+
+    order.status = ORDER_STATUS_CANCELLED;
+    order.updatedAt = now;
+    ctx.db.tradeOrder.id.update(order);
   }
 );
 
@@ -330,6 +1104,21 @@ export const resetSimulation = spacetimedb.reducer(ctx => {
 
   for (const snapshot of Array.from(ctx.db.marketSnapshot.iter())) {
     ctx.db.marketSnapshot.delete(snapshot);
+  }
+
+  for (const order of Array.from(ctx.db.tradeOrder.iter())) {
+    ctx.db.tradeOrder.delete(order);
+  }
+
+  for (const position of Array.from(ctx.db.tradingPosition.iter())) {
+    ctx.db.tradingPosition.delete(position);
+  }
+
+  for (const account of Array.from(ctx.db.tradingAccount.iter())) {
+    account.balance = DEFAULT_ACCOUNT_BALANCE;
+    account.reservedBalance = 0;
+    account.updatedAt = ctx.timestamp;
+    ctx.db.tradingAccount.auth0UserId.update(account);
   }
 
   for (const level of Array.from(ctx.db.marketOrderBookLevel.iter())) {
@@ -437,7 +1226,7 @@ export const tickMarkets = spacetimedb.reducer(
           close: quoteTick.price,
           volume: quoteTick.volume,
         };
-        nextCandleId += 1n;
+        nextCandleId += BigInt(1);
         ctx.db.marketMinuteCandle.insert(nextMinuteRow);
         // updatedMinuteRows = minuteRows.concat(nextMinuteRow);
 
@@ -476,7 +1265,7 @@ export const tickMarkets = spacetimedb.reducer(
           close: quoteTick.price,
           volume: quoteTick.volume,
         };
-        nextCandleId += 1n;
+        nextCandleId += BigInt(1);
         ctx.db.marketDayCandle.insert(nextDayRow);
         // updatedDayRows = dayRows.concat(nextDayRow);
 
@@ -520,6 +1309,8 @@ export const tickMarkets = spacetimedb.reducer(
         dayClose: nextDayRow.close,
         dayVolume: nextDayRow.volume,
       });
+
+      maybeFillOpenLimitOrders(ctx, state.marketId, quoteTick.price, now);
     }
 
     ctx.db.simulatorState.delete(simulator);

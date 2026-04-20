@@ -7,10 +7,12 @@ const MAX_DAY_CANDLES_PER_MARKET = DAY_HISTORY_COUNT * 2;
 const ORDER_BOOK_LEVELS_PER_SIDE = 4;
 const MS_PER_MINUTE = 60_000;
 const MS_PER_DAY = 86_400_000;
-const RNG_MASK = (1n << 64n) - 1n;
+const RNG_MASK = (BigInt(1) << BigInt(64)) - BigInt(1);
 const AUTH0_ISSUER = 'https://exness-auth.jp.auth0.com/';
 const AUTH0_AUDIENCE = 'https://my-exness-spacetimedb';
 const RESET_SIMULATION_PERMISSION = 'simulation:reset';
+const DEFAULT_ACCOUNT_CURRENCY = 'USD';
+const DEFAULT_ACCOUNT_BALANCE = 10_000;
 
 type SeedMarket = {
   id: number;
@@ -57,6 +59,48 @@ type MarketOrderBookLevelRow = {
   price: number;
   size: number;
   updatedAt: import('spacetimedb').Timestamp;
+};
+
+type UserProfileRow = {
+  auth0UserId: string;
+  senderIdentity: import('spacetimedb').Identity;
+  displayName: string;
+  email: string;
+  createdAt: import('spacetimedb').Timestamp;
+  updatedAt: import('spacetimedb').Timestamp;
+};
+
+type TradingAccountRow = {
+  auth0UserId: string;
+  currency: string;
+  balance: number;
+  reservedBalance: number;
+  updatedAt: import('spacetimedb').Timestamp;
+};
+
+type TradingPositionRow = {
+  id: string;
+  auth0UserId: string;
+  marketId: number;
+  quantity: number;
+  reservedQuantity: number;
+  averageEntryPrice: number;
+  updatedAt: import('spacetimedb').Timestamp;
+};
+
+type TradeOrderRow = {
+  id: bigint;
+  auth0UserId: string;
+  marketId: number;
+  side: string;
+  orderType: string;
+  status: string;
+  quantity: number;
+  limitPrice: number | undefined;
+  filledPrice: number | undefined;
+  createdAt: import('spacetimedb').Timestamp;
+  updatedAt: import('spacetimedb').Timestamp;
+  filledAt: import('spacetimedb').Timestamp | undefined;
 };
 
 const SEED_MARKETS: SeedMarket[] = [
@@ -138,6 +182,8 @@ export {
   AUTH0_AUDIENCE,
   AUTH0_ISSUER,
   DAY_HISTORY_COUNT,
+  DEFAULT_ACCOUNT_BALANCE,
+  DEFAULT_ACCOUNT_CURRENCY,
   MAX_DAY_CANDLES_PER_MARKET,
   MAX_MINUTE_CANDLES_PER_MARKET,
   MINUTES_IN_24H,
@@ -152,4 +198,13 @@ export {
   SEED_MARKETS_BY_ID,
 };
 
-export type { CandleRow, MarketOrderBookLevelRow, MarketSnapshotRow, SeedMarket };
+export type {
+  CandleRow,
+  MarketOrderBookLevelRow,
+  MarketSnapshotRow,
+  SeedMarket,
+  TradeOrderRow,
+  TradingAccountRow,
+  TradingPositionRow,
+  UserProfileRow,
+};

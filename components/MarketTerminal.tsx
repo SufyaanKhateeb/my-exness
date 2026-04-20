@@ -7,6 +7,7 @@ import { type IntervalUnit } from '@/lib/market-terminal';
 import { LiveMarketChart } from '@/components/market-terminal/LiveMarketChart';
 import { LiveOrderBook } from '@/components/market-terminal/LiveOrderBook';
 import { LiveMarketSidebar } from '@/components/market-terminal/LiveMarketSidebar';
+import { LiveTradingPanel } from '@/components/market-terminal/LiveTradingPanel';
 import { LiveTerminalHero } from '@/components/market-terminal/LiveTerminalHero';
 import { reducers, tables } from '@/src/module_bindings';
 
@@ -62,11 +63,22 @@ export default function MarketTerminal() {
               onIntervalAmountChange={setIntervalAmount}
               onIntervalUnitChange={setIntervalUnit}
             />
-            <LiveOrderBook
-              key={`order-book:${selectedMarket.id}`}
-              marketId={selectedMarket.id}
-              precision={selectedMarket.precision}
-            />
+            <div className="space-y-3">
+              <LiveOrderBook
+                key={`order-book:${selectedMarket.id}`}
+                marketId={selectedMarket.id}
+                precision={selectedMarket.precision}
+              />
+              <LiveTradingPanel
+                key={`trading-panel:${selectedMarket.id}`}
+                marketId={selectedMarket.id}
+                marketSymbol={selectedMarket.symbol}
+                baseAsset={selectedMarket.baseAsset}
+                quoteAsset={selectedMarket.quoteAsset}
+                precision={selectedMarket.precision}
+                quoteIntervalMs={selectedMarket.quoteIntervalMs}
+              />
+            </div>
           </div>
         </div>
       </section>

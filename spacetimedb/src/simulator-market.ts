@@ -24,17 +24,17 @@ function clampPrice(value: number, minPrice: number) {
 }
 
 function nextSeed(seed: bigint) {
-  let value = (seed ^ 0x9e3779b97f4a7c15n) & RNG_MASK;
-  value ^= value << 13n;
+  let value = (seed ^ BigInt('0x9e3779b97f4a7c15')) & RNG_MASK;
+  value ^= value << BigInt(13);
   value &= RNG_MASK;
-  value ^= value >> 7n;
+  value ^= value >> BigInt(7);
   value &= RNG_MASK;
-  value ^= value << 17n;
+  value ^= value << BigInt(17);
   return value & RNG_MASK;
 }
 
 function unitFloat(seed: bigint) {
-  return Number(seed % 1_000_000n) / 1_000_000;
+  return Number(seed % BigInt(1_000_000)) / 1_000_000;
 }
 
 function floorToMinute(timestamp: Timestamp) {
@@ -49,10 +49,10 @@ function floorToDay(timestamp: Timestamp) {
 
 function sortCandlesByTime(left: { bucketStart: Timestamp }, right: { bucketStart: Timestamp }) {
   const delta = left.bucketStart.toMillis() - right.bucketStart.toMillis();
-  if (delta < 0n) {
+  if (delta < BigInt(0)) {
     return -1;
   }
-  if (delta > 0n) {
+  if (delta > BigInt(0)) {
     return 1;
   }
   return 0;
@@ -65,7 +65,7 @@ function buildQuoteTick(
   tick: number
 ) {
   const moveSeed = nextSeed(seed + BigInt(tick) + BigInt(seedMarket.id));
-  const volumeSeed = nextSeed(moveSeed + 31n);
+  const volumeSeed = nextSeed(moveSeed + BigInt(31));
   const phaseBias = tick % 320 < 220 ? 1 : -0.42;
   const shock =
     (unitFloat(moveSeed) - 0.5) * 2 * seedMarket.changeRate +
@@ -88,7 +88,7 @@ function buildSeedHistoryCandleBackward(
   scale: number
 ) {
   const moveSeed = nextSeed(seed + BigInt(tick) + BigInt(seedMarket.id * 17));
-  const volumeSeed = nextSeed(moveSeed + 59n);
+  const volumeSeed = nextSeed(moveSeed + BigInt(59));
   const scaledRate = seedMarket.changeRate * scale;
   const directionalBias = seedMarket.drift * Math.max(1, scale * 0.2);
   const shock =
@@ -194,7 +194,7 @@ function buildDayCandlesFromMinuteHistory(
         0
       )
     );
-    currentCandleId += 1n;
+    currentCandleId += BigInt(1);
   }
 
   return {
@@ -229,7 +229,7 @@ function summarizeMarketSnapshot(
 }
 
 function getOrderBookLevelRowId(marketId: number, isBid: boolean, level: number) {
-  return BigInt(marketId) * 100n + BigInt(isBid ? level + 1 : level + 51);
+  return BigInt(marketId) * BigInt(100) + BigInt(isBid ? level + 1 : level + 51);
 }
 
 function buildOrderBookLevels(
@@ -243,8 +243,8 @@ function buildOrderBookLevels(
   const baseStep = Math.max(referencePrice * seedMarket.changeRate * 0.18, halfSpread * 0.45);
 
   for (let level = 0; level < ORDER_BOOK_LEVELS_PER_SIDE; level += 1) {
-    const bidSeed = nextSeed(seed + BigInt(level + 1) * 17n);
-    const askSeed = nextSeed(seed + BigInt(level + 1) * 31n);
+    const bidSeed = nextSeed(seed + BigInt(level + 1) * BigInt(17));
+    const askSeed = nextSeed(seed + BigInt(level + 1) * BigInt(31));
     const spacingMultiplier = 1 + level * 0.72;
     const bidPrice = clampPrice(
       referencePrice - halfSpread - baseStep * spacingMultiplier,
