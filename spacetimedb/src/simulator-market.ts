@@ -13,7 +13,7 @@ import type {
   MarketSnapshotRow,
   SeedMarket,
 } from './simulator-config';
-import type { ExchangeCtx } from './index';
+import type { ExchangeCtx } from './module';
 
 function timestampFromMillis(value: number) {
   return Timestamp.fromDate(new Date(value));
@@ -218,57 +218,48 @@ function summarizeMarketSnapshot(
 
   return {
     marketId: seedMarket.id,
-    price: lastRow.close,
-    open24h: firstRow.open,
-    high24h: minuteRows.reduce((value, row) => Math.max(value, row.high), firstRow.high),
-    low24h: minuteRows.reduce((value, row) => Math.min(value, row.low), firstRow.low),
-    change24h: ((lastRow.close - firstRow.open) / firstRow.open) * 100,
+    price: lastRow?.close ?? seedMarket.basePrice,
+    open24h: firstRow?.open ?? seedMarket.basePrice,
+    high24h: minuteRows.reduce((value, row) => Math.max(value, row.high), firstRow?.high ?? seedMarket.basePrice),
+    low24h: minuteRows.reduce((value, row) => Math.min(value, row.low), firstRow?.low ?? seedMarket.basePrice),
+    change24h: firstRow ? lastRow.close - firstRow.open : 0,
     volume24h: minuteRows.reduce((value, row) => value + row.volume, 0),
     updatedAt,
   };
 }
 
-function getOrderBookLevelRowId(marketId: number, isBid: boolean, level: number) {
-  return BigInt(marketId) * BigInt(100) + BigInt(isBid ? level + 1 : level + 51);
-}
-
 function buildOrderBookLevels(
   seedMarket: SeedMarket,
-  referencePrice: number,
+  midPrice: number,
   seed: bigint,
   updatedAt: Timestamp
-) {
+): MarketOrderBookLevelRow[] {
   const levels: MarketOrderBookLevelRow[] = [];
-  const halfSpread = referencePrice * (seedMarket.spreadBps / 10_000) * 0.5;
-  const baseStep = Math.max(referencePrice * seedMarket.changeRate * 0.18, halfSpread * 0.45);
+  const spread = midPrice * (seedMarket.spreadBps / 10_000);
+  const topBid = clampPrice(midPrice - spread / 2, seedMarket.minPrice);
+  const topAsk = topBid + spread;
 
   for (let level = 0; level < ORDER_BOOK_LEVELS_PER_SIDE; level += 1) {
-    const bidSeed = nextSeed(seed + BigInt(level + 1) * BigInt(17));
-    const askSeed = nextSeed(seed + BigInt(level + 1) * BigInt(31));
-    const spacingMultiplier = 1 + level * 0.72;
-    const bidPrice = clampPrice(
-      referencePrice - halfSpread - baseStep * spacingMultiplier,
-      seedMarket.minPrice
-    );
-    const askPrice = Math.max(referencePrice + halfSpread + baseStep * spacingMultiplier, bidPrice);
-    const baseSize = seedMarket.baseVolume * 0.018 * (1 + (ORDER_BOOK_LEVELS_PER_SIDE - level) * 0.11);
+    const levelSeed = nextSeed(seed + BigInt(level * 97 + seedMarket.id));
+    const sizeBase = seedMarket.baseVolume * (0.8 + unitFloat(levelSeed) * 1.6);
+    const priceStep = Math.max(spread * 0.55, midPrice * 0.0009) * level;
 
     levels.push({
-      id: getOrderBookLevelRowId(seedMarket.id, true, level),
+      id: BigInt(seedMarket.id * 100 + level),
       marketId: seedMarket.id,
       isBid: true,
       level,
-      price: bidPrice,
-      size: baseSize * (0.7 + unitFloat(bidSeed) * 1.1),
+      price: clampPrice(topBid - priceStep, seedMarket.minPrice),
+      size: sizeBase,
       updatedAt,
     });
     levels.push({
-      id: getOrderBookLevelRowId(seedMarket.id, false, level),
+      id: BigInt(seedMarket.id * 100 + ORDER_BOOK_LEVELS_PER_SIDE + level),
       marketId: seedMarket.id,
       isBid: false,
       level,
-      price: askPrice,
-      size: baseSize * (0.7 + unitFloat(askSeed) * 1.1),
+      price: topAsk + priceStep,
+      size: sizeBase,
       updatedAt,
     });
   }
@@ -277,13 +268,12 @@ function buildOrderBookLevels(
 }
 
 export {
-  buildOrderBookLevels,
   buildDayCandlesFromMinuteHistory,
+  buildOrderBookLevels,
   buildQuoteTick,
   buildSeedHistoryCandleBackward,
   floorToDay,
   floorToMinute,
-  sortCandlesByTime,
   summarizeMarketSnapshot,
   timestampFromMillis,
 };

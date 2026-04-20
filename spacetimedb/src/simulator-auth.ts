@@ -4,7 +4,7 @@ import {
   AUTH0_AUDIENCE,
   AUTH0_ISSUER,
 } from './simulator-config';
-import type { ExchangeCtx } from './index';
+import type { ExchangeCtx } from './module';
 
 type AuthenticatedContext = Pick<ExchangeCtx, 'senderAuth'>;
 
