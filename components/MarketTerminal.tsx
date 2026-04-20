@@ -5,6 +5,7 @@ import { useReducer, useTable } from 'spacetimedb/react';
 
 import { type IntervalUnit } from '@/lib/market-terminal';
 import { LiveMarketChart } from '@/components/market-terminal/LiveMarketChart';
+import { LiveOrderBook } from '@/components/market-terminal/LiveOrderBook';
 import { LiveMarketSidebar } from '@/components/market-terminal/LiveMarketSidebar';
 import { LiveTerminalHero } from '@/components/market-terminal/LiveTerminalHero';
 import { reducers, tables } from '@/src/module_bindings';
@@ -51,15 +52,22 @@ export default function MarketTerminal() {
         />
 
         <div className="px-3 pb-3 pt-2 md:px-4 md:pb-4">
-          <LiveMarketChart
-            key={`${selectedMarket.id}:${intervalAmount}:${intervalUnit}`}
-            marketId={selectedMarket.id}
-            precision={selectedMarket.precision}
-            intervalAmount={intervalAmount}
-            intervalUnit={intervalUnit}
-            onIntervalAmountChange={setIntervalAmount}
-            onIntervalUnitChange={setIntervalUnit}
-          />
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+            <LiveMarketChart
+              key={`${selectedMarket.id}:${intervalAmount}:${intervalUnit}`}
+              marketId={selectedMarket.id}
+              precision={selectedMarket.precision}
+              intervalAmount={intervalAmount}
+              intervalUnit={intervalUnit}
+              onIntervalAmountChange={setIntervalAmount}
+              onIntervalUnitChange={setIntervalUnit}
+            />
+            <LiveOrderBook
+              key={`order-book:${selectedMarket.id}`}
+              marketId={selectedMarket.id}
+              precision={selectedMarket.precision}
+            />
+          </div>
         </div>
       </section>
     </div>

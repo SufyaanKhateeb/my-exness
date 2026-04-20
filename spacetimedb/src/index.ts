@@ -12,6 +12,7 @@ import {
 import type { CandleRow } from './simulator-config';
 import { ensureAuth0Jwt, ensurePermission } from './simulator-auth';
 import {
+  buildOrderBookLevels,
   buildDayCandlesFromMinuteHistory,
   buildQuoteTick,
   buildSeedHistoryCandleBackward,
@@ -68,6 +69,18 @@ const spacetimedb = schema({
       low24h: t.f64(),
       change24h: t.f64(),
       volume24h: t.f64(),
+      updatedAt: t.timestamp(),
+    }
+  ),
+  marketOrderBookLevel: table(
+    { public: true, name: 'market_order_book_level' },
+    {
+      id: t.u64().primaryKey(),
+      marketId: t.u32().index(),
+      isBid: t.bool(),
+      level: t.u8(),
+      price: t.f64(),
+      size: t.f64(),
       updatedAt: t.timestamp(),
     }
   ),
@@ -149,6 +162,7 @@ function seedSimulator(ctx: ExchangeCtx) {
   if (
     ctx.db.market.count() > 0n ||
     ctx.db.marketSnapshot.count() > 0n ||
+    ctx.db.marketOrderBookLevel.count() > 0n ||
     ctx.db.marketState.count() > 0n ||
     ctx.db.marketTickSchedule.count() > 0n ||
     ctx.db.simulatorState.count() > 0n
@@ -244,6 +258,10 @@ function seedSimulator(ctx: ExchangeCtx) {
     ctx.db.marketSnapshot.insert(
       summarizeMarketSnapshot(ctx, market, now)
     );
+
+    for (const level of buildOrderBookLevels(market, currentMinuteRow.close, minuteSeed, now)) {
+      ctx.db.marketOrderBookLevel.insert(level);
+    }
   }
 
   ctx.db.simulatorState.insert({
@@ -266,6 +284,7 @@ export const onConnect = spacetimedb.clientConnected(ctx => {
   if (
     ctx.db.market.count() === 0n ||
     ctx.db.marketSnapshot.count() === 0n ||
+    ctx.db.marketOrderBookLevel.count() === 0n ||
     ctx.db.marketState.count() === 0n ||
     ctx.db.marketTickSchedule.count() === 0n ||
     ctx.db.simulatorState.count() === 0n
@@ -311,6 +330,10 @@ export const resetSimulation = spacetimedb.reducer(ctx => {
 
   for (const snapshot of Array.from(ctx.db.marketSnapshot.iter())) {
     ctx.db.marketSnapshot.delete(snapshot);
+  }
+
+  for (const level of Array.from(ctx.db.marketOrderBookLevel.iter())) {
+    ctx.db.marketOrderBookLevel.delete(level);
   }
 
   for (const simulator of Array.from(ctx.db.simulatorState.iter())) {
@@ -371,6 +394,12 @@ export const tickMarkets = spacetimedb.reducer(
         close: state.dayClose,
         volume: state.dayVolume,
       };
+      const nextOrderBookLevels = buildOrderBookLevels(
+        marketSeed,
+        quoteTick.price,
+        quoteTick.seed,
+        now
+      );
       // const minuteRows = Array.from(
       //   ctx.db.marketMinuteCandle.marketId.filter(state.marketId)
       // );
@@ -463,6 +492,13 @@ export const tickMarkets = spacetimedb.reducer(
       ctx.db.marketSnapshot.insert(
         summarizeMarketSnapshot(ctx, marketSeed, now)
       );
+
+      for (const existingLevel of Array.from(ctx.db.marketOrderBookLevel.marketId.filter(state.marketId))) {
+        ctx.db.marketOrderBookLevel.delete(existingLevel);
+      }
+      for (const level of nextOrderBookLevels) {
+        ctx.db.marketOrderBookLevel.insert(level);
+      }
 
       ctx.db.marketState.delete(state);
       ctx.db.marketState.insert({

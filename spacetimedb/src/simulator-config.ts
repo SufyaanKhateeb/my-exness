@@ -1,9 +1,10 @@
-const QUOTE_INTERVAL_MS = 600;
-const MINUTE_HISTORY_COUNT = 400 * 24 * 60;
-const DAY_HISTORY_COUNT = 400;
+const QUOTE_INTERVAL_MS = 1000;
+const MINUTE_HISTORY_COUNT = 50 * 24 * 60;
+const DAY_HISTORY_COUNT = 50;
 const MINUTES_IN_24H = 24 * 60;
 const MAX_MINUTE_CANDLES_PER_MARKET = MINUTE_HISTORY_COUNT * 2;
 const MAX_DAY_CANDLES_PER_MARKET = DAY_HISTORY_COUNT * 2;
+const ORDER_BOOK_LEVELS_PER_SIDE = 4;
 const MS_PER_MINUTE = 60_000;
 const MS_PER_DAY = 86_400_000;
 const RNG_MASK = (1n << 64n) - 1n;
@@ -45,6 +46,16 @@ type MarketSnapshotRow = {
   low24h: number;
   change24h: number;
   volume24h: number;
+  updatedAt: import('spacetimedb').Timestamp;
+};
+
+type MarketOrderBookLevelRow = {
+  id: bigint;
+  marketId: number;
+  isBid: boolean;
+  level: number;
+  price: number;
+  size: number;
   updatedAt: import('spacetimedb').Timestamp;
 };
 
@@ -133,6 +144,7 @@ export {
   MINUTE_HISTORY_COUNT,
   MS_PER_DAY,
   MS_PER_MINUTE,
+  ORDER_BOOK_LEVELS_PER_SIDE,
   QUOTE_INTERVAL_MS,
   RESET_SIMULATION_PERMISSION,
   RNG_MASK,
@@ -140,4 +152,4 @@ export {
   SEED_MARKETS_BY_ID,
 };
 
-export type { CandleRow, MarketSnapshotRow, SeedMarket };
+export type { CandleRow, MarketOrderBookLevelRow, MarketSnapshotRow, SeedMarket };

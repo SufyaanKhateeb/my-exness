@@ -47,6 +47,17 @@ export const MarketMinuteCandle = __t.object("MarketMinuteCandle", {
 });
 export type MarketMinuteCandle = __Infer<typeof MarketMinuteCandle>;
 
+export const MarketOrderBookLevel = __t.object("MarketOrderBookLevel", {
+  id: __t.u64(),
+  marketId: __t.u32(),
+  isBid: __t.bool(),
+  level: __t.u8(),
+  price: __t.f64(),
+  size: __t.f64(),
+  updatedAt: __t.timestamp(),
+});
+export type MarketOrderBookLevel = __Infer<typeof MarketOrderBookLevel>;
+
 export const MarketSnapshot = __t.object("MarketSnapshot", {
   marketId: __t.u32(),
   price: __t.f64(),

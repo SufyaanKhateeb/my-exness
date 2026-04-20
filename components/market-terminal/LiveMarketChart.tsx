@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Timestamp } from "spacetimedb";
 import { useSpacetimeDB, useTable } from "spacetimedb/react";
 import { CandlestickData } from "lightweight-charts";
@@ -17,7 +17,6 @@ import {
     type SourceCandle,
     sortByBucketStart,
     usesMinuteSource,
-    getStableSortedSourceCandles,
 } from "@/lib/market-terminal";
 import { tables } from "@/src/module_bindings";
 
@@ -41,8 +40,6 @@ export function LiveMarketChart({
     const conn = useSpacetimeDB();
     const safeIntervalAmount = Math.max(1, Math.trunc(intervalAmount) || 1);
     const activeSourceUsesMinutes = usesMinuteSource(intervalUnit);
-    const previousSelectedMinuteCandlesRef = useRef<SourceCandle[]>([]);
-    const previousSelectedDayCandlesRef = useRef<SourceCandle[]>([]);
     const [selectedMinuteCandles, setSelectedMinuteCandles] = useState<SourceCandle[]>([]); // Force re-render when interval changes
     const [selectedDayCandles, setSelectedDayCandles] = useState<SourceCandle[]>([]); // Force re-render when interval changes
 

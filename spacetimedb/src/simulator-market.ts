@@ -2,12 +2,17 @@ import { Timestamp } from 'spacetimedb';
 
 import {
   DAY_HISTORY_COUNT,
-  MINUTES_IN_24H,
   MS_PER_DAY,
   MS_PER_MINUTE,
+  ORDER_BOOK_LEVELS_PER_SIDE,
   RNG_MASK,
 } from './simulator-config';
-import type { CandleRow, MarketSnapshotRow, SeedMarket } from './simulator-config';
+import type {
+  CandleRow,
+  MarketOrderBookLevelRow,
+  MarketSnapshotRow,
+  SeedMarket,
+} from './simulator-config';
 import type { ExchangeCtx } from './index';
 
 function timestampFromMillis(value: number) {
@@ -223,7 +228,56 @@ function summarizeMarketSnapshot(
   };
 }
 
+function getOrderBookLevelRowId(marketId: number, isBid: boolean, level: number) {
+  return BigInt(marketId) * 100n + BigInt(isBid ? level + 1 : level + 51);
+}
+
+function buildOrderBookLevels(
+  seedMarket: SeedMarket,
+  referencePrice: number,
+  seed: bigint,
+  updatedAt: Timestamp
+) {
+  const levels: MarketOrderBookLevelRow[] = [];
+  const halfSpread = referencePrice * (seedMarket.spreadBps / 10_000) * 0.5;
+  const baseStep = Math.max(referencePrice * seedMarket.changeRate * 0.18, halfSpread * 0.45);
+
+  for (let level = 0; level < ORDER_BOOK_LEVELS_PER_SIDE; level += 1) {
+    const bidSeed = nextSeed(seed + BigInt(level + 1) * 17n);
+    const askSeed = nextSeed(seed + BigInt(level + 1) * 31n);
+    const spacingMultiplier = 1 + level * 0.72;
+    const bidPrice = clampPrice(
+      referencePrice - halfSpread - baseStep * spacingMultiplier,
+      seedMarket.minPrice
+    );
+    const askPrice = Math.max(referencePrice + halfSpread + baseStep * spacingMultiplier, bidPrice);
+    const baseSize = seedMarket.baseVolume * 0.018 * (1 + (ORDER_BOOK_LEVELS_PER_SIDE - level) * 0.11);
+
+    levels.push({
+      id: getOrderBookLevelRowId(seedMarket.id, true, level),
+      marketId: seedMarket.id,
+      isBid: true,
+      level,
+      price: bidPrice,
+      size: baseSize * (0.7 + unitFloat(bidSeed) * 1.1),
+      updatedAt,
+    });
+    levels.push({
+      id: getOrderBookLevelRowId(seedMarket.id, false, level),
+      marketId: seedMarket.id,
+      isBid: false,
+      level,
+      price: askPrice,
+      size: baseSize * (0.7 + unitFloat(askSeed) * 1.1),
+      updatedAt,
+    });
+  }
+
+  return levels;
+}
+
 export {
+  buildOrderBookLevels,
   buildDayCandlesFromMinuteHistory,
   buildQuoteTick,
   buildSeedHistoryCandleBackward,

@@ -44,6 +44,7 @@ import SayHelloReducer from "./say_hello_reducer";
 import MarketRow from "./market_table";
 import MarketDayCandleRow from "./market_day_candle_table";
 import MarketMinuteCandleRow from "./market_minute_candle_table";
+import MarketOrderBookLevelRow from "./market_order_book_level_table";
 import MarketSnapshotRow from "./market_snapshot_table";
 import PersonRow from "./person_table";
 
@@ -108,6 +109,20 @@ const tablesSchema = __schema({
       { name: 'market_minute_candle_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, MarketMinuteCandleRow),
+  marketOrderBookLevel: __table({
+    name: 'market_order_book_level',
+    indexes: [
+      { accessor: 'id', name: 'market_order_book_level_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'marketId', name: 'market_order_book_level_market_id_idx_btree', algorithm: 'btree', columns: [
+        'marketId',
+      ] },
+    ],
+    constraints: [
+      { name: 'market_order_book_level_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MarketOrderBookLevelRow),
   marketSnapshot: __table({
     name: 'market_snapshot',
     indexes: [
