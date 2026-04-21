@@ -10,7 +10,7 @@ import {
 } from './simulator-config';
 import type { CandleRow } from './simulator-config';
 import type { ExchangeCtx } from './module';
-import { maybeFillOpenLimitOrders } from './trading-runtime';
+import { evaluatePriceAlertsForMarket, maybeFillOpenLimitOrders } from './trading-runtime';
 import {
   buildOrderBookLevels,
   buildDayCandlesFromMinuteHistory,
@@ -308,6 +308,8 @@ function tickAllMarkets(ctx: ExchangeCtx) {
     for (const level of nextOrderBookLevels) {
       ctx.db.marketOrderBookLevel.insert(level);
     }
+
+    evaluatePriceAlertsForMarket(ctx, state.marketId, now);
 
     ctx.db.marketState.delete(state);
     ctx.db.marketState.insert({

@@ -3,22 +3,30 @@ import { SenderError, t } from 'spacetimedb/server';
 import spacetimedb, {
   marketOrderStateRow,
   marketPositionStateRow,
+  notificationStateRow,
   ORDER_SIDE_BUY,
   ORDER_SIDE_SELL,
   ORDER_STATUS_CANCELLED,
   ORDER_STATUS_OPEN,
   ORDER_TYPE_LIMIT,
   ORDER_TYPE_MARKET,
+  PRICE_ALERT_STATUS_ACTIVE,
+  positionHistoryStateRow,
+  priceAlertStateRow,
   POSITION_EPSILON,
   tradingAccountStateRow,
 } from './module';
 import {
   DEFAULT_ACCOUNT_BALANCE,
+  DEFAULT_ACCOUNT_LEVERAGE,
   DEFAULT_ACCOUNT_CURRENCY,
+  MS_PER_DAY,
 } from './simulator-config';
 import { getCurrentAuth0UserId } from './simulator-auth';
+import { timestampFromMillis } from './simulator-market';
 import {
   computeTradingAccountState,
+  evaluatePriceAlertsForMarket,
   ensureMarketSnapshot,
   ensureTradingAccount,
   ensureTradingResourceAccess,
@@ -27,9 +35,16 @@ import {
   getAuth0UserIdBySenderIdentity,
   getAvailableBalance,
   getAvailablePositionQuantity,
+  getReferenceMarketPrice,
   getPositionId,
+  inferPriceAlertDirection,
   listMarketOrderStateRows,
   listMarketPositionStateRows,
+  listNotificationStateRows,
+  listPositionHistoryStateRows,
+  listPriceAlertStateRows,
+  requireAllowedPriceAlertExpiryDays,
+  requireAllowedPriceAlertReference,
   requirePositivePrice,
   requirePositiveQuantity,
 } from './trading-runtime';
@@ -84,6 +99,33 @@ const myMarketOrders = spacetimedb.view(
   }
 );
 
+const myPositionHistory = spacetimedb.view(
+  { name: 'my_position_history', public: true },
+  t.array(positionHistoryStateRow),
+  ctx => {
+    const auth0UserId = getAuth0UserIdBySenderIdentity(ctx, ctx.sender);
+    return auth0UserId ? listPositionHistoryStateRows(ctx, auth0UserId) : [];
+  }
+);
+
+const myPriceAlerts = spacetimedb.view(
+  { name: 'my_price_alerts', public: true },
+  t.array(priceAlertStateRow),
+  ctx => {
+    const auth0UserId = getAuth0UserIdBySenderIdentity(ctx, ctx.sender);
+    return auth0UserId ? listPriceAlertStateRows(ctx, auth0UserId) : [];
+  }
+);
+
+const myNotifications = spacetimedb.view(
+  { name: 'my_notifications', public: true },
+  t.array(notificationStateRow),
+  ctx => {
+    const auth0UserId = getAuth0UserIdBySenderIdentity(ctx, ctx.sender);
+    return auth0UserId ? listNotificationStateRows(ctx, auth0UserId) : [];
+  }
+);
+
 const syncCurrentUser = spacetimedb.reducer(
   {
     displayName: t.string(),
@@ -117,6 +159,9 @@ const syncCurrentUser = spacetimedb.reducer(
     const existingAccount = ctx.db.tradingAccount.auth0UserId.find(auth0UserId);
 
     if (existingAccount) {
+      if (!existingAccount.accountLeverage || existingAccount.accountLeverage <= 0) {
+        existingAccount.accountLeverage = DEFAULT_ACCOUNT_LEVERAGE;
+      }
       existingAccount.updatedAt = now;
       ctx.db.tradingAccount.auth0UserId.update(existingAccount);
       return;
@@ -126,6 +171,7 @@ const syncCurrentUser = spacetimedb.reducer(
       auth0UserId,
       currency: DEFAULT_ACCOUNT_CURRENCY,
       balance: DEFAULT_ACCOUNT_BALANCE,
+      accountLeverage: DEFAULT_ACCOUNT_LEVERAGE,
       reservedBalance: 0,
       updatedAt: now,
     });
@@ -290,12 +336,84 @@ const cancelOrder = spacetimedb.reducer(
   }
 );
 
+const createPriceAlert = spacetimedb.reducer(
+  {
+    marketId: t.u32(),
+    triggerPrice: t.f64(),
+    referencePriceKind: t.string(),
+    expiryDays: t.u16(),
+  },
+  (ctx, { marketId, triggerPrice, referencePriceKind, expiryDays }) => {
+    const { auth0UserId } = ensureTradingResourceAccess(ctx);
+    requirePositivePrice(triggerPrice);
+    requireAllowedPriceAlertReference(referencePriceKind);
+    requireAllowedPriceAlertExpiryDays(expiryDays);
+    ensureMarketSnapshot(ctx, marketId);
+
+    const now = ctx.timestamp;
+    const currentReferencePrice = getReferenceMarketPrice(ctx, marketId, referencePriceKind);
+    const triggerDirection = inferPriceAlertDirection(currentReferencePrice, triggerPrice);
+    const expiresAt = timestampFromMillis(Number(now.toMillis()) + Number(expiryDays) * MS_PER_DAY);
+
+    ctx.db.priceAlert.insert({
+      id: BigInt(0),
+      auth0UserId,
+      marketId,
+      triggerPrice,
+      referencePriceKind,
+      triggerDirection,
+      status: PRICE_ALERT_STATUS_ACTIVE,
+      expiresAt,
+      triggeredAt: undefined,
+      triggeredPrice: undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    evaluatePriceAlertsForMarket(ctx, marketId, now);
+  }
+);
+
+const deletePriceAlert = spacetimedb.reducer(
+  { alertId: t.u64() },
+  (ctx, { alertId }) => {
+    const { auth0UserId } = ensureTradingResourceAccess(ctx);
+    const alert = ctx.db.priceAlert.id.find(alertId);
+
+    if (!alert || alert.auth0UserId !== auth0UserId) {
+      throw new SenderError('Price alert not found.');
+    }
+
+    ctx.db.priceAlert.delete(alert);
+  }
+);
+
+const deleteNotification = spacetimedb.reducer(
+  { notificationId: t.u64() },
+  (ctx, { notificationId }) => {
+    const { auth0UserId } = ensureTradingResourceAccess(ctx);
+    const notification = ctx.db.notification.id.find(notificationId);
+
+    if (!notification || notification.auth0UserId !== auth0UserId) {
+      throw new SenderError('Notification not found.');
+    }
+
+    ctx.db.notification.delete(notification);
+  }
+);
+
 export {
   cancelOrder,
+  createPriceAlert,
   currentUserCanTrade,
   currentUserExists,
+  deleteNotification,
+  deletePriceAlert,
   myMarketOrders,
   myMarketPositionState,
+  myNotifications,
+  myPositionHistory,
+  myPriceAlerts,
   myTradingAccountState,
   placeLimitOrder,
   placeMarketOrder,

@@ -15,6 +15,10 @@ import type {
 } from './simulator-config';
 import type { ExchangeCtx } from './module';
 
+const LIVE_VOLATILITY_DAMPING = 0.32;
+const HISTORY_VOLATILITY_DAMPING = 0.45;
+const MEAN_REVERSION_STRENGTH = 0.08;
+
 function timestampFromMillis(value: number) {
   return Timestamp.fromDate(new Date(value));
 }
@@ -66,10 +70,13 @@ function buildQuoteTick(
 ) {
   const moveSeed = nextSeed(seed + BigInt(tick) + BigInt(seedMarket.id));
   const volumeSeed = nextSeed(moveSeed + BigInt(31));
-  const phaseBias = tick % 320 < 220 ? 1 : -0.42;
-  const shock =
-    (unitFloat(moveSeed) - 0.5) * 2 * seedMarket.changeRate +
-    seedMarket.drift * phaseBias;
+  const phaseBias = tick % 320 < 220 ? 0.45 : -0.2;
+  const randomShock =
+    (unitFloat(moveSeed) - 0.5) * 2 * seedMarket.changeRate * LIVE_VOLATILITY_DAMPING;
+  const driftShock = seedMarket.drift * phaseBias * LIVE_VOLATILITY_DAMPING;
+  const distanceFromBase = (currentPrice - seedMarket.basePrice) / seedMarket.basePrice;
+  const meanReversionShock = -distanceFromBase * seedMarket.changeRate * MEAN_REVERSION_STRENGTH;
+  const shock = randomShock + driftShock + meanReversionShock;
 
   return {
     seed: volumeSeed,
@@ -89,14 +96,15 @@ function buildSeedHistoryCandleBackward(
 ) {
   const moveSeed = nextSeed(seed + BigInt(tick) + BigInt(seedMarket.id * 17));
   const volumeSeed = nextSeed(moveSeed + BigInt(59));
-  const scaledRate = seedMarket.changeRate * scale;
-  const directionalBias = seedMarket.drift * Math.max(1, scale * 0.2);
+  const scaledRate = seedMarket.changeRate * scale * HISTORY_VOLATILITY_DAMPING;
+  const directionalBias =
+    seedMarket.drift * Math.max(0.35, scale * 0.08) * HISTORY_VOLATILITY_DAMPING;
   const shock =
     (unitFloat(moveSeed) - 0.5) * 2 * scaledRate +
-    directionalBias * (tick % 28 < 18 ? 1 : -0.35);
+    directionalBias * (tick % 28 < 18 ? 0.55 : -0.18);
   const boundedMultiplier = Math.max(0.1, 1 + shock);
   const open = clampPrice(closePrice / boundedMultiplier, seedMarket.minPrice);
-  const wick = Math.abs(shock) * 0.78 + unitFloat(volumeSeed) * scaledRate * 0.45;
+  const wick = Math.abs(shock) * 0.42 + unitFloat(volumeSeed) * scaledRate * 0.2;
 
   return {
     seed: volumeSeed,
@@ -215,14 +223,17 @@ function summarizeMarketSnapshot(
 
   const firstRow = minuteRows[0];
   const lastRow = minuteRows[minuteRows.length - 1];
+  const open24h = firstRow?.open ?? seedMarket.basePrice;
+  const lastPrice = lastRow?.close ?? seedMarket.basePrice;
+  const change24h = open24h === 0 ? 0 : ((lastPrice - open24h) / open24h) * 100;
 
   return {
     marketId: seedMarket.id,
-    price: lastRow?.close ?? seedMarket.basePrice,
-    open24h: firstRow?.open ?? seedMarket.basePrice,
+    price: lastPrice,
+    open24h,
     high24h: minuteRows.reduce((value, row) => Math.max(value, row.high), firstRow?.high ?? seedMarket.basePrice),
     low24h: minuteRows.reduce((value, row) => Math.min(value, row.low), firstRow?.low ?? seedMarket.basePrice),
-    change24h: firstRow ? lastRow.close - firstRow.open : 0,
+    change24h,
     volume24h: minuteRows.reduce((value, row) => value + row.volume, 0),
     updatedAt,
   };

@@ -6,6 +6,9 @@ import { SpacetimeDBProvider, useReducer, useSpacetimeDB } from 'spacetimedb/rea
 import { DbConnection, ErrorContext, reducers } from '../src/module_bindings';
 import { Identity } from 'spacetimedb';
 
+import { NotificationBridge } from '../components/NotificationBridge';
+import { Toaster } from '@/components/ui/sonner';
+
 const HOST =
   process.env.NEXT_PUBLIC_SPACETIMEDB_HOST ?? 'wss://maincloud.spacetimedb.com';
 const DB_NAME = process.env.NEXT_PUBLIC_SPACETIMEDB_DB_NAME ?? 'nextjs-ts';
@@ -185,7 +188,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
       key={user ? `auth0:${connectionToken ?? 'missing-token'}` : 'anonymous'}
       connectionBuilder={connectionBuilder}
     >
-      <Auth0UserSync user={user ?? undefined}>{children}</Auth0UserSync>
+      <Auth0UserSync user={user ?? undefined}>
+        <NotificationBridge />
+        {children}
+        <Toaster richColors position="top-right" />
+      </Auth0UserSync>
     </SpacetimeDBProvider>
   );
 }

@@ -36,6 +36,9 @@ import {
 // Import all reducer arg schemas
 import AddReducer from "./add_reducer";
 import CancelOrderReducer from "./cancel_order_reducer";
+import CreatePriceAlertReducer from "./create_price_alert_reducer";
+import DeleteNotificationReducer from "./delete_notification_reducer";
+import DeletePriceAlertReducer from "./delete_price_alert_reducer";
 import PlaceLimitOrderReducer from "./place_limit_order_reducer";
 import PlaceMarketOrderReducer from "./place_market_order_reducer";
 import ResetSimulationReducer from "./reset_simulation_reducer";
@@ -54,6 +57,9 @@ import MarketOrderBookLevelRow from "./market_order_book_level_table";
 import MarketSnapshotRow from "./market_snapshot_table";
 import MyMarketOrdersRow from "./my_market_orders_table";
 import MyMarketPositionStateRow from "./my_market_position_state_table";
+import MyNotificationsRow from "./my_notifications_table";
+import MyPositionHistoryRow from "./my_position_history_table";
+import MyPriceAlertsRow from "./my_price_alerts_table";
 import MyTradingAccountStateRow from "./my_trading_account_state_table";
 import PersonRow from "./person_table";
 
@@ -164,6 +170,27 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, MyMarketPositionStateRow),
+  myNotifications: __table({
+    name: 'my_notifications',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyNotificationsRow),
+  myPositionHistory: __table({
+    name: 'my_position_history',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyPositionHistoryRow),
+  myPriceAlerts: __table({
+    name: 'my_price_alerts',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyPriceAlertsRow),
   myTradingAccountState: __table({
     name: 'my_trading_account_state',
     indexes: [
@@ -177,6 +204,9 @@ const tablesSchema = __schema({
 const reducersSchema = __reducers(
   __reducerSchema("add", AddReducer),
   __reducerSchema("cancel_order", CancelOrderReducer),
+  __reducerSchema("create_price_alert", CreatePriceAlertReducer),
+  __reducerSchema("delete_notification", DeleteNotificationReducer),
+  __reducerSchema("delete_price_alert", DeletePriceAlertReducer),
   __reducerSchema("place_limit_order", PlaceLimitOrderReducer),
   __reducerSchema("place_market_order", PlaceMarketOrderReducer),
   __reducerSchema("reset_simulation", ResetSimulationReducer),

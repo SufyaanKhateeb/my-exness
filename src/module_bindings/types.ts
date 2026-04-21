@@ -132,13 +132,104 @@ export type MyMarketOrders = __Infer<typeof MyMarketOrders>;
 export const MyMarketPositionState = __t.object("MyMarketPositionState", {});
 export type MyMarketPositionState = __Infer<typeof MyMarketPositionState>;
 
+export const MyNotifications = __t.object("MyNotifications", {});
+export type MyNotifications = __Infer<typeof MyNotifications>;
+
+export const MyPositionHistory = __t.object("MyPositionHistory", {});
+export type MyPositionHistory = __Infer<typeof MyPositionHistory>;
+
+export const MyPriceAlerts = __t.object("MyPriceAlerts", {});
+export type MyPriceAlerts = __Infer<typeof MyPriceAlerts>;
+
 export const MyTradingAccountState = __t.object("MyTradingAccountState", {});
 export type MyTradingAccountState = __Infer<typeof MyTradingAccountState>;
+
+export const Notification = __t.object("Notification", {
+  id: __t.u64(),
+  auth0UserId: __t.string(),
+  kind: __t.string(),
+  level: __t.string(),
+  title: __t.string(),
+  message: __t.string(),
+  marketId: __t.option(__t.u32()),
+  createdAt: __t.timestamp(),
+});
+export type Notification = __Infer<typeof Notification>;
+
+export const NotificationState = __t.object("NotificationState", {
+  id: __t.u64(),
+  auth0UserId: __t.string(),
+  kind: __t.string(),
+  level: __t.string(),
+  title: __t.string(),
+  message: __t.string(),
+  marketId: __t.option(__t.u32()),
+  createdAt: __t.timestamp(),
+});
+export type NotificationState = __Infer<typeof NotificationState>;
 
 export const Person = __t.object("Person", {
   name: __t.string(),
 });
 export type Person = __Infer<typeof Person>;
+
+export const PositionHistory = __t.object("PositionHistory", {
+  id: __t.u64(),
+  orderId: __t.u64(),
+  auth0UserId: __t.string(),
+  marketId: __t.u32(),
+  quantity: __t.f64(),
+  entryPrice: __t.f64(),
+  exitPrice: __t.f64(),
+  realizedPnl: __t.f64(),
+  closedAt: __t.timestamp(),
+});
+export type PositionHistory = __Infer<typeof PositionHistory>;
+
+export const PositionHistoryState = __t.object("PositionHistoryState", {
+  id: __t.u64(),
+  orderId: __t.u64(),
+  auth0UserId: __t.string(),
+  marketId: __t.u32(),
+  quantity: __t.f64(),
+  entryPrice: __t.f64(),
+  exitPrice: __t.f64(),
+  realizedPnl: __t.f64(),
+  closedAt: __t.timestamp(),
+});
+export type PositionHistoryState = __Infer<typeof PositionHistoryState>;
+
+export const PriceAlert = __t.object("PriceAlert", {
+  id: __t.u64(),
+  auth0UserId: __t.string(),
+  marketId: __t.u32(),
+  triggerPrice: __t.f64(),
+  referencePriceKind: __t.string(),
+  triggerDirection: __t.string(),
+  status: __t.string(),
+  expiresAt: __t.timestamp(),
+  triggeredAt: __t.option(__t.timestamp()),
+  triggeredPrice: __t.option(__t.f64()),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type PriceAlert = __Infer<typeof PriceAlert>;
+
+export const PriceAlertState = __t.object("PriceAlertState", {
+  id: __t.u64(),
+  auth0UserId: __t.string(),
+  marketId: __t.u32(),
+  triggerPrice: __t.f64(),
+  referencePriceKind: __t.string(),
+  triggerDirection: __t.string(),
+  status: __t.string(),
+  expiresAt: __t.timestamp(),
+  triggeredAt: __t.option(__t.timestamp()),
+  triggeredPrice: __t.option(__t.f64()),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type PriceAlertState = __Infer<typeof PriceAlertState>;
 
 export const SimulatorState = __t.object("SimulatorState", {
   id: __t.u8(),
@@ -166,6 +257,7 @@ export const TradingAccount = __t.object("TradingAccount", {
   auth0UserId: __t.string(),
   currency: __t.string(),
   balance: __t.f64(),
+  accountLeverage: __t.u16(),
   reservedBalance: __t.f64(),
   updatedAt: __t.timestamp(),
 });
@@ -175,6 +267,11 @@ export const TradingAccountState = __t.object("TradingAccountState", {
   auth0UserId: __t.string(),
   currency: __t.string(),
   balance: __t.f64(),
+  equity: __t.f64(),
+  margin: __t.f64(),
+  freeMargin: __t.f64(),
+  marginLevel: __t.f64(),
+  accountLeverage: __t.u16(),
   reservedBalance: __t.f64(),
   availableBalance: __t.f64(),
   unrealizedPnl: __t.f64(),

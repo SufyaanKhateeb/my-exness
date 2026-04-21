@@ -8,6 +8,9 @@ import { type Infer as __Infer } from "spacetimedb";
 // Import all reducer arg schemas
 import AddReducer from "../add_reducer";
 import CancelOrderReducer from "../cancel_order_reducer";
+import CreatePriceAlertReducer from "../create_price_alert_reducer";
+import DeleteNotificationReducer from "../delete_notification_reducer";
+import DeletePriceAlertReducer from "../delete_price_alert_reducer";
 import PlaceLimitOrderReducer from "../place_limit_order_reducer";
 import PlaceMarketOrderReducer from "../place_market_order_reducer";
 import ResetSimulationReducer from "../reset_simulation_reducer";
@@ -16,6 +19,9 @@ import SyncCurrentUserReducer from "../sync_current_user_reducer";
 
 export type AddParams = __Infer<typeof AddReducer>;
 export type CancelOrderParams = __Infer<typeof CancelOrderReducer>;
+export type CreatePriceAlertParams = __Infer<typeof CreatePriceAlertReducer>;
+export type DeleteNotificationParams = __Infer<typeof DeleteNotificationReducer>;
+export type DeletePriceAlertParams = __Infer<typeof DeletePriceAlertReducer>;
 export type PlaceLimitOrderParams = __Infer<typeof PlaceLimitOrderReducer>;
 export type PlaceMarketOrderParams = __Infer<typeof PlaceMarketOrderReducer>;
 export type ResetSimulationParams = __Infer<typeof ResetSimulationReducer>;

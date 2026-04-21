@@ -11,10 +11,16 @@ export { init, onConnect, onDisconnect } from './lifecycle';
 export { add, sayHello } from './misc-api';
 export {
   cancelOrder,
+  createPriceAlert,
   currentUserCanTrade,
   currentUserExists,
+  deleteNotification,
+  deletePriceAlert,
   myMarketOrders,
   myMarketPositionState,
+  myNotifications,
+  myPositionHistory,
+  myPriceAlerts,
   myTradingAccountState,
   placeLimitOrder,
   placeMarketOrder,

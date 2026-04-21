@@ -1,6 +1,10 @@
 import { SenderError } from 'spacetimedb/server';
 
 import {
+  NOTIFICATION_KIND_PRICE_ALERT_EXPIRED,
+  NOTIFICATION_KIND_PRICE_ALERT_TRIGGERED,
+  NOTIFICATION_LEVEL_INFO,
+  NOTIFICATION_LEVEL_SUCCESS,
   ORDER_SIDE_BUY,
   ORDER_SIDE_SELL,
   ORDER_STATUS_CANCELLED,
@@ -8,13 +12,23 @@ import {
   ORDER_STATUS_OPEN,
   ORDER_TYPE_LIMIT,
   ORDER_TYPE_MARKET,
+  PRICE_ALERT_DIRECTION_ABOVE,
+  PRICE_ALERT_DIRECTION_BELOW,
+  PRICE_ALERT_REFERENCE_ASK,
+  PRICE_ALERT_REFERENCE_BID,
+  PRICE_ALERT_STATUS_ACTIVE,
+  PRICE_ALERT_STATUS_EXPIRED,
+  PRICE_ALERT_STATUS_TRIGGERED,
   POSITION_EPSILON,
   type ExchangeCtx,
+  type NotificationRowType,
+  type PriceAlertRowType,
   type TradingAccountRowType,
   type TradeOrderRowType,
   type TradingPositionRowType,
   type TradingReadCtx,
 } from './module';
+import { DEFAULT_ACCOUNT_LEVERAGE } from './simulator-config';
 import { ensureAuth0Jwt, getCurrentAuth0UserId } from './simulator-auth';
 
 function normalizeQuantity(value: number) {
@@ -30,6 +44,21 @@ function requirePositiveQuantity(quantity: number) {
 function requirePositivePrice(price: number) {
   if (!Number.isFinite(price) || price <= 0) {
     throw new SenderError('Price must be greater than zero.');
+  }
+}
+
+function requireAllowedPriceAlertReference(referencePriceKind: string) {
+  if (
+    referencePriceKind !== PRICE_ALERT_REFERENCE_BID &&
+    referencePriceKind !== PRICE_ALERT_REFERENCE_ASK
+  ) {
+    throw new SenderError('Price alerts must target either the bid or ask price.');
+  }
+}
+
+function requireAllowedPriceAlertExpiryDays(expiryDays: number) {
+  if (![1, 5, 15, 30].includes(expiryDays)) {
+    throw new SenderError('Price alert expiry must be 1, 5, 15, or 30 days.');
   }
 }
 
@@ -95,13 +124,105 @@ function ensureMarketSnapshot(ctx: ExchangeCtx, marketId: number) {
   return snapshot;
 }
 
+function getBestBidAsk(ctx: TradingReadCtx, marketId: number) {
+  const levels = Array.from(ctx.db.marketOrderBookLevel.marketId.filter(marketId));
+  const bidLevels = levels.filter(level => level.isBid).sort((left, right) => right.price - left.price);
+  const askLevels = levels.filter(level => !level.isBid).sort((left, right) => left.price - right.price);
+  const snapshot = ctx.db.marketSnapshot.marketId.find(marketId);
+
+  return {
+    bestBid: bidLevels[0]?.price ?? snapshot?.price,
+    bestAsk: askLevels[0]?.price ?? snapshot?.price,
+  };
+}
+
+function getReferenceMarketPrice(
+  ctx: TradingReadCtx,
+  marketId: number,
+  referencePriceKind: string
+) {
+  requireAllowedPriceAlertReference(referencePriceKind);
+  const { bestBid, bestAsk } = getBestBidAsk(ctx, marketId);
+  const referencePrice = referencePriceKind === PRICE_ALERT_REFERENCE_BID ? bestBid : bestAsk;
+
+  if (referencePrice == null || !Number.isFinite(referencePrice)) {
+    throw new SenderError('Reference market price is unavailable for this alert.');
+  }
+
+  return referencePrice;
+}
+
+function inferPriceAlertDirection(currentPrice: number, triggerPrice: number) {
+  return triggerPrice >= currentPrice ? PRICE_ALERT_DIRECTION_ABOVE : PRICE_ALERT_DIRECTION_BELOW;
+}
+
+function doesPriceAlertTrigger(
+  alert: { triggerPrice: number; triggerDirection: string },
+  currentPrice: number
+) {
+  if (alert.triggerDirection === PRICE_ALERT_DIRECTION_ABOVE) {
+    return currentPrice + POSITION_EPSILON >= alert.triggerPrice;
+  }
+
+  if (alert.triggerDirection === PRICE_ALERT_DIRECTION_BELOW) {
+    return currentPrice - POSITION_EPSILON <= alert.triggerPrice;
+  }
+
+  throw new SenderError('Price alert direction is invalid.');
+}
+
+function createNotification(
+  ctx: ExchangeCtx,
+  input: {
+    auth0UserId: string;
+    kind: string;
+    level: string;
+    title: string;
+    message: string;
+    marketId?: number;
+    createdAt: ExchangeCtx['timestamp'];
+  }
+) {
+  ctx.db.notification.insert({
+    id: BigInt(0),
+    auth0UserId: input.auth0UserId,
+    kind: input.kind,
+    level: input.level,
+    title: input.title,
+    message: input.message,
+    marketId: input.marketId,
+    createdAt: input.createdAt,
+  });
+}
+
+function listNotificationStateRows(ctx: TradingReadCtx, auth0UserId: string) {
+  return (Array.from(ctx.db.notification.auth0UserId.filter(auth0UserId)) as NotificationRowType[])
+    .sort((left, right) => Number(left.createdAt.toMillis() - right.createdAt.toMillis()))
+    .map(notification => ({
+      id: notification.id,
+      auth0UserId: notification.auth0UserId,
+      kind: notification.kind,
+      level: notification.level,
+      title: notification.title,
+      message: notification.message,
+      marketId: notification.marketId,
+      createdAt: notification.createdAt,
+    }));
+}
+
 function computeTradingAccountState(ctx: TradingReadCtx, auth0UserId: string) {
   const account = ensureTradingAccount(ctx, auth0UserId);
   let unrealizedPnl = 0;
-  let netLiquidationValue = account.balance;
+  let openPositionCostBasis = 0;
+  let openPositionMarketValue = 0;
+  let margin = 0;
   const positions = Array.from(
     ctx.db.tradingPosition.auth0UserId.filter(auth0UserId)
   ) as TradingPositionRowType[];
+  const accountLeverage =
+    account.accountLeverage && account.accountLeverage > 0
+      ? account.accountLeverage
+      : DEFAULT_ACCOUNT_LEVERAGE;
 
   for (const position of positions) {
     const snapshot = ctx.db.marketSnapshot.marketId.find(position.marketId);
@@ -110,19 +231,34 @@ function computeTradingAccountState(ctx: TradingReadCtx, auth0UserId: string) {
       continue;
     }
 
+    const positionCostBasis = Math.abs(position.quantity) * position.averageEntryPrice;
+    const positionMarketValue = Math.abs(position.quantity) * snapshot.price;
     const positionUnrealizedPnl = position.quantity * (snapshot.price - position.averageEntryPrice);
+
+    openPositionCostBasis += positionCostBasis;
+    openPositionMarketValue += positionMarketValue;
     unrealizedPnl += positionUnrealizedPnl;
-    netLiquidationValue += position.quantity * snapshot.price;
+    margin += positionMarketValue / accountLeverage;
   }
+
+  const balance = account.balance + openPositionCostBasis;
+  const equity = account.balance + openPositionMarketValue;
+  const freeMargin = equity - margin - account.reservedBalance;
+  const marginLevel = margin > POSITION_EPSILON ? (equity / margin) * 100 : 0;
 
   return {
     auth0UserId,
     currency: account.currency,
-    balance: account.balance,
+    balance,
+    equity,
+    margin,
+    freeMargin,
+    marginLevel,
+    accountLeverage,
     reservedBalance: account.reservedBalance,
-    availableBalance: getAvailableBalance(account),
+    availableBalance: freeMargin,
     unrealizedPnl,
-    netLiquidationValue,
+    netLiquidationValue: equity,
     updatedAt: account.updatedAt,
   };
 }
@@ -174,6 +310,93 @@ function listMarketOrderStateRows(ctx: TradingReadCtx, auth0UserId: string) {
       updatedAt: order.updatedAt,
       filledAt: order.filledAt,
     }));
+}
+
+function listPositionHistoryStateRows(ctx: TradingReadCtx, auth0UserId: string) {
+  return Array.from(ctx.db.positionHistory.auth0UserId.filter(auth0UserId))
+    .sort((left, right) => Number(right.closedAt.toMillis() - left.closedAt.toMillis()))
+    .map(positionHistory => ({
+      id: positionHistory.id,
+      orderId: positionHistory.orderId,
+      auth0UserId: positionHistory.auth0UserId,
+      marketId: positionHistory.marketId,
+      quantity: positionHistory.quantity,
+      entryPrice: positionHistory.entryPrice,
+      exitPrice: positionHistory.exitPrice,
+      realizedPnl: positionHistory.realizedPnl,
+      closedAt: positionHistory.closedAt,
+    }));
+}
+
+function listPriceAlertStateRows(ctx: TradingReadCtx, auth0UserId: string) {
+  return (Array.from(ctx.db.priceAlert.auth0UserId.filter(auth0UserId)) as PriceAlertRowType[])
+    .sort((left, right) => Number(right.updatedAt.toMillis() - left.updatedAt.toMillis()))
+    .map(alert => ({
+      id: alert.id,
+      auth0UserId: alert.auth0UserId,
+      marketId: alert.marketId,
+      triggerPrice: alert.triggerPrice,
+      referencePriceKind: alert.referencePriceKind,
+      triggerDirection: alert.triggerDirection,
+      status: alert.status,
+      expiresAt: alert.expiresAt,
+      triggeredAt: alert.triggeredAt,
+      triggeredPrice: alert.triggeredPrice,
+      createdAt: alert.createdAt,
+      updatedAt: alert.updatedAt,
+    }));
+}
+
+function evaluatePriceAlertsForMarket(
+  ctx: ExchangeCtx,
+  marketId: number,
+  evaluatedAt: ExchangeCtx['timestamp']
+) {
+  const market = ctx.db.market.id.find(marketId);
+  const marketSymbol = market?.symbol ?? `Market #${marketId}`;
+
+  for (const alert of Array.from(ctx.db.priceAlert.marketId.filter(marketId)) as PriceAlertRowType[]) {
+    if (alert.status !== PRICE_ALERT_STATUS_ACTIVE) {
+      continue;
+    }
+
+    if (alert.expiresAt.toMillis() <= evaluatedAt.toMillis()) {
+      alert.status = PRICE_ALERT_STATUS_EXPIRED;
+      alert.updatedAt = evaluatedAt;
+      ctx.db.priceAlert.id.update(alert);
+      createNotification(ctx, {
+        auth0UserId: alert.auth0UserId,
+        kind: NOTIFICATION_KIND_PRICE_ALERT_EXPIRED,
+        level: NOTIFICATION_LEVEL_INFO,
+        title: 'Price alert expired',
+        message: `${marketSymbol} ${alert.referencePriceKind} alert at ${alert.triggerPrice} expired before triggering.`,
+        marketId,
+        createdAt: evaluatedAt,
+      });
+      continue;
+    }
+
+    const referencePrice = getReferenceMarketPrice(ctx, marketId, alert.referencePriceKind);
+
+    if (!doesPriceAlertTrigger(alert, referencePrice)) {
+      continue;
+    }
+
+    alert.status = PRICE_ALERT_STATUS_TRIGGERED;
+    alert.triggeredAt = evaluatedAt;
+    alert.triggeredPrice = referencePrice;
+    alert.updatedAt = evaluatedAt;
+    ctx.db.priceAlert.id.update(alert);
+    createNotification(ctx, {
+      auth0UserId: alert.auth0UserId,
+      kind: NOTIFICATION_KIND_PRICE_ALERT_TRIGGERED,
+      level: NOTIFICATION_LEVEL_SUCCESS,
+      title: 'Price alert triggered',
+      message: `${marketSymbol} ${alert.referencePriceKind} reached ${referencePrice} against your alert at ${alert.triggerPrice}.`,
+      marketId,
+      createdAt: evaluatedAt,
+    });
+  }
 }
 
 function executeAgainstOrderBook(
@@ -354,6 +577,18 @@ function fillTradeOrder(
     account.updatedAt = filledAt;
     ctx.db.tradingAccount.auth0UserId.update(account);
 
+    ctx.db.positionHistory.insert({
+      id: BigInt(0),
+      orderId: order.id,
+      auth0UserId: order.auth0UserId,
+      marketId: order.marketId,
+      quantity: order.quantity,
+      entryPrice: existingPosition.averageEntryPrice,
+      exitPrice: fillPrice,
+      realizedPnl: order.quantity * (fillPrice - existingPosition.averageEntryPrice),
+      closedAt: filledAt,
+    });
+
     const nextQuantity = existingPosition.quantity - order.quantity;
     const nextReservedQuantity = order.orderType === ORDER_TYPE_LIMIT
       ? existingPosition.reservedQuantity - order.quantity
@@ -423,6 +658,8 @@ export {
   POSITION_EPSILON,
   computeMarketPositionState,
   computeTradingAccountState,
+  doesPriceAlertTrigger,
+  evaluatePriceAlertsForMarket,
   ensureMarketSnapshot,
   ensureTradingAccount,
   ensureTradingResourceAccess,
@@ -431,10 +668,17 @@ export {
   getAuth0UserIdBySenderIdentity,
   getAvailableBalance,
   getAvailablePositionQuantity,
+  getReferenceMarketPrice,
   getPositionId,
+  inferPriceAlertDirection,
   listMarketOrderStateRows,
   listMarketPositionStateRows,
+  listNotificationStateRows,
+  listPositionHistoryStateRows,
+  listPriceAlertStateRows,
   maybeFillOpenLimitOrders,
+  requireAllowedPriceAlertExpiryDays,
+  requireAllowedPriceAlertReference,
   requirePositivePrice,
   requirePositiveQuantity,
   upsertTradingPosition,
