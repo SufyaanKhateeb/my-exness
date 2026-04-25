@@ -168,6 +168,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         .withUri(HOST)
         .withDatabaseName(DB_NAME)
         .withToken(connectionToken)
+        .withCompression('gzip')
         .onConnect(onConnect)
         .onDisconnect(onDisconnect)
         .onConnectError(onConnectError);
