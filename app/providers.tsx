@@ -192,7 +192,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <Auth0UserSync user={user ?? undefined}>
         <NotificationBridge />
         {children}
-        <Toaster richColors position="top-right" />
+        <Toaster position="top-right" />
       </Auth0UserSync>
     </SpacetimeDBProvider>
   );

@@ -15,7 +15,7 @@ export default function MarketTerminal() {
   const [markets, marketsReady] = useTable(tables.market);
   const resetSimulation = useReducer(reducers.resetSimulation);
   const [selectedMarketId, setSelectedMarketId] = useState<number | null>(null);
-  const [intervalAmount, setIntervalAmount] = useState(15);
+  const [intervalAmount, setIntervalAmount] = useState(1);
   const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>('minute');
 
   const sortedMarkets = useMemo(
@@ -35,7 +35,7 @@ export default function MarketTerminal() {
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
+    <div className="grid gap-4 xl:grid-cols-[520px_minmax(0,1fr)]">
       <LiveMarketSidebar
         markets={sortedMarkets}
         selectedMarketId={selectedMarket.id}
