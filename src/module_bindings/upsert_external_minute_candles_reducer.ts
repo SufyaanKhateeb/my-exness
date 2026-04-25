@@ -10,9 +10,12 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+import {
+  ExternalMarketCandleInput,
+} from "./types";
+
 export default {
-  marketId: __t.u32(),
-  side: __t.string(),
-  executionType: __t.string(),
-  quantity: __t.f64(),
+  get candles() {
+    return __t.array(ExternalMarketCandleInput);
+  },
 };

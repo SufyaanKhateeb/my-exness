@@ -14,6 +14,7 @@ export default __t.row({
   id: __t.u64(),
   marketId: __t.u32().name("market_id"),
   side: __t.string(),
+  executionType: __t.string().name("execution_type"),
   orderType: __t.string().name("order_type"),
   status: __t.string(),
   quantity: __t.f64(),

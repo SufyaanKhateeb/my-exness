@@ -10,7 +10,17 @@ export type {
 export { init, onConnect, onDisconnect } from './lifecycle';
 export { add, sayHello } from './misc-api';
 export {
+  bootstrapExternalMarket,
+  ingestExternalMarketSnapshot,
+  replaceExternalOrderBook,
+  upsertExternalDayCandle,
+  upsertExternalDayCandles,
+  upsertExternalMinuteCandle,
+  upsertExternalMinuteCandles,
+} from './market-ingest-api';
+export {
   cancelOrder,
+  closeMarketPosition,
   createPriceAlert,
   currentUserCanTrade,
   currentUserExists,
@@ -19,6 +29,7 @@ export {
   myMarketOrders,
   myMarketPositionState,
   myNotifications,
+  myOpenPositionLots,
   myPositionHistory,
   myPriceAlerts,
   myTradingAccountState,

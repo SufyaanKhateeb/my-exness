@@ -11,9 +11,29 @@ const RNG_MASK = (BigInt(1) << BigInt(64)) - BigInt(1);
 const AUTH0_ISSUER = 'https://exness-auth.jp.auth0.com/';
 const AUTH0_AUDIENCE = 'https://my-exness-spacetimedb';
 const RESET_SIMULATION_PERMISSION = 'simulation:reset';
+const MARKET_INGEST_PERMISSION = 'market:ingest';
 const DEFAULT_ACCOUNT_CURRENCY = 'USD';
 const DEFAULT_ACCOUNT_BALANCE = 10_000;
 const DEFAULT_ACCOUNT_LEVERAGE = 200;
+const MARKET_DATA_MODE_SIMULATOR = 'simulator';
+const MARKET_DATA_MODE_EXTERNAL = 'external';
+const ACTIVE_MARKET_DATA_MODE = MARKET_DATA_MODE_EXTERNAL;
+
+function getMarketDataMode() {
+  if (ACTIVE_MARKET_DATA_MODE === MARKET_DATA_MODE_EXTERNAL) {
+    return MARKET_DATA_MODE_EXTERNAL;
+  }
+
+  return MARKET_DATA_MODE_SIMULATOR;
+}
+
+function isSyntheticMarketDataMode() {
+  return getMarketDataMode() === MARKET_DATA_MODE_SIMULATOR;
+}
+
+function isExternalMarketDataMode() {
+  return getMarketDataMode() === MARKET_DATA_MODE_EXTERNAL;
+}
 
 type SeedMarket = {
   id: number;
@@ -94,6 +114,7 @@ type TradeOrderRow = {
   auth0UserId: string;
   marketId: number;
   side: string;
+  executionType: string;
   orderType: string;
   status: string;
   quantity: number;
@@ -186,8 +207,15 @@ export {
   DEFAULT_ACCOUNT_BALANCE,
   DEFAULT_ACCOUNT_LEVERAGE,
   DEFAULT_ACCOUNT_CURRENCY,
+  ACTIVE_MARKET_DATA_MODE,
+  getMarketDataMode,
+  isExternalMarketDataMode,
+  isSyntheticMarketDataMode,
+  MARKET_INGEST_PERMISSION,
   MAX_DAY_CANDLES_PER_MARKET,
   MAX_MINUTE_CANDLES_PER_MARKET,
+  MARKET_DATA_MODE_EXTERNAL,
+  MARKET_DATA_MODE_SIMULATOR,
   MINUTES_IN_24H,
   MINUTE_HISTORY_COUNT,
   MS_PER_DAY,

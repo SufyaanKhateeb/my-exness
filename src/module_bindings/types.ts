@@ -10,6 +10,24 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const ExternalMarketCandleInput = __t.object("ExternalMarketCandleInput", {
+  marketId: __t.u32(),
+  bucketStartMillis: __t.u64(),
+  open: __t.f64(),
+  high: __t.f64(),
+  low: __t.f64(),
+  close: __t.f64(),
+  volume: __t.f64(),
+});
+export type ExternalMarketCandleInput = __Infer<typeof ExternalMarketCandleInput>;
+
+export const ExternalOrderBookLevelInput = __t.object("ExternalOrderBookLevelInput", {
+  level: __t.u8(),
+  price: __t.f64(),
+  size: __t.f64(),
+});
+export type ExternalOrderBookLevelInput = __Infer<typeof ExternalOrderBookLevelInput>;
+
 export const Market = __t.object("Market", {
   id: __t.u32(),
   symbol: __t.string(),
@@ -62,6 +80,7 @@ export const MarketOrderState = __t.object("MarketOrderState", {
   id: __t.u64(),
   marketId: __t.u32(),
   side: __t.string(),
+  executionType: __t.string(),
   orderType: __t.string(),
   status: __t.string(),
   quantity: __t.f64(),
@@ -135,6 +154,9 @@ export type MyMarketPositionState = __Infer<typeof MyMarketPositionState>;
 export const MyNotifications = __t.object("MyNotifications", {});
 export type MyNotifications = __Infer<typeof MyNotifications>;
 
+export const MyOpenPositionLots = __t.object("MyOpenPositionLots", {});
+export type MyOpenPositionLots = __Infer<typeof MyOpenPositionLots>;
+
 export const MyPositionHistory = __t.object("MyPositionHistory", {});
 export type MyPositionHistory = __Infer<typeof MyPositionHistory>;
 
@@ -167,6 +189,20 @@ export const NotificationState = __t.object("NotificationState", {
   createdAt: __t.timestamp(),
 });
 export type NotificationState = __Infer<typeof NotificationState>;
+
+export const OpenPositionLotState = __t.object("OpenPositionLotState", {
+  id: __t.u64(),
+  auth0UserId: __t.string(),
+  marketId: __t.u32(),
+  side: __t.string(),
+  quantity: __t.f64(),
+  openPrice: __t.f64(),
+  currentPrice: __t.f64(),
+  unrealizedPnl: __t.f64(),
+  openedAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type OpenPositionLotState = __Infer<typeof OpenPositionLotState>;
 
 export const Person = __t.object("Person", {
   name: __t.string(),
@@ -242,6 +278,7 @@ export const TradeOrder = __t.object("TradeOrder", {
   auth0UserId: __t.string(),
   marketId: __t.u32(),
   side: __t.string(),
+  executionType: __t.string(),
   orderType: __t.string(),
   status: __t.string(),
   quantity: __t.f64(),
@@ -290,6 +327,18 @@ export const TradingPosition = __t.object("TradingPosition", {
   updatedAt: __t.timestamp(),
 });
 export type TradingPosition = __Infer<typeof TradingPosition>;
+
+export const TradingPositionLot = __t.object("TradingPositionLot", {
+  id: __t.u64(),
+  auth0UserId: __t.string(),
+  marketId: __t.u32(),
+  side: __t.string(),
+  quantity: __t.f64(),
+  openPrice: __t.f64(),
+  openedAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type TradingPositionLot = __Infer<typeof TradingPositionLot>;
 
 export const UserProfile = __t.object("UserProfile", {
   auth0UserId: __t.string(),

@@ -12,7 +12,5 @@ import {
 
 export default {
   marketId: __t.u32(),
-  side: __t.string(),
-  executionType: __t.string(),
   quantity: __t.f64(),
 };

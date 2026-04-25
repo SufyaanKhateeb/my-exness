@@ -10,9 +10,15 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default {
-  marketId: __t.u32(),
+export default __t.row({
+  id: __t.u64(),
+  auth0UserId: __t.string().name("auth_0_user_id"),
+  marketId: __t.u32().name("market_id"),
   side: __t.string(),
-  executionType: __t.string(),
   quantity: __t.f64(),
-};
+  openPrice: __t.f64().name("open_price"),
+  currentPrice: __t.f64().name("current_price"),
+  unrealizedPnl: __t.f64().name("unrealized_pnl"),
+  openedAt: __t.timestamp().name("opened_at"),
+  updatedAt: __t.timestamp().name("updated_at"),
+});

@@ -4,6 +4,9 @@ import spacetimedb, {
   marketOrderStateRow,
   marketPositionStateRow,
   notificationStateRow,
+  openPositionLotStateRow,
+  ORDER_EXECUTION_TYPE_CLOSE,
+  ORDER_EXECUTION_TYPE_OPEN,
   ORDER_SIDE_BUY,
   ORDER_SIDE_SELL,
   ORDER_STATUS_CANCELLED,
@@ -33,7 +36,6 @@ import {
   executeAgainstOrderBook,
   fillTradeOrder,
   getAuth0UserIdBySenderIdentity,
-  getAvailableBalance,
   getAvailablePositionQuantity,
   getReferenceMarketPrice,
   getPositionId,
@@ -41,8 +43,10 @@ import {
   listMarketOrderStateRows,
   listMarketPositionStateRows,
   listNotificationStateRows,
+  listOpenPositionLotStateRows,
   listPositionHistoryStateRows,
   listPriceAlertStateRows,
+  requireAllowedExecutionType,
   requireAllowedPriceAlertExpiryDays,
   requireAllowedPriceAlertReference,
   requirePositivePrice,
@@ -87,6 +91,15 @@ const myMarketPositionState = spacetimedb.view(
   ctx => {
     const auth0UserId = getAuth0UserIdBySenderIdentity(ctx, ctx.sender);
     return auth0UserId ? listMarketPositionStateRows(ctx, auth0UserId) : [];
+  }
+);
+
+const myOpenPositionLots = spacetimedb.view(
+  { name: 'my_open_position_lots', public: true },
+  t.array(openPositionLotStateRow),
+  ctx => {
+    const auth0UserId = getAuth0UserIdBySenderIdentity(ctx, ctx.sender);
+    return auth0UserId ? listOpenPositionLotStateRows(ctx, auth0UserId) : [];
   }
 );
 
@@ -182,33 +195,37 @@ const placeMarketOrder = spacetimedb.reducer(
   {
     marketId: t.u32(),
     side: t.string(),
+    executionType: t.string(),
     quantity: t.f64(),
   },
-  (ctx, { marketId, side, quantity }) => {
-    const { auth0UserId, account } = ensureTradingResourceAccess(ctx);
+  (ctx, { marketId, side, executionType, quantity }) => {
+    const { auth0UserId } = ensureTradingResourceAccess(ctx);
     requirePositiveQuantity(quantity);
+    requireAllowedExecutionType(executionType);
     ensureMarketSnapshot(ctx, marketId);
 
     if (side !== ORDER_SIDE_BUY && side !== ORDER_SIDE_SELL) {
       throw new SenderError('Unsupported order side.');
     }
 
+    if (executionType !== ORDER_EXECUTION_TYPE_OPEN) {
+      throw new SenderError('Use the dedicated close reducer for close orders.');
+    }
+
     const now = ctx.timestamp;
     const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
+    const positionSide = position && Math.abs(position.quantity) > POSITION_EPSILON
+      ? (position.quantity > 0 ? ORDER_SIDE_BUY : ORDER_SIDE_SELL)
+      : undefined;
+
+    if (positionSide && positionSide !== side) {
+      throw new SenderError('Close the current position before opening the opposite side.');
+    }
+
     const execution = executeAgainstOrderBook(ctx, marketId, side, quantity, undefined, now);
 
     if (!execution) {
       throw new SenderError('Insufficient order book size to execute this market order.');
-    }
-
-    const notional = quantity * execution.averageFillPrice;
-
-    if (side === ORDER_SIDE_BUY && getAvailableBalance(account) + POSITION_EPSILON < notional) {
-      throw new SenderError('Insufficient available balance.');
-    }
-
-    if (side === ORDER_SIDE_SELL && getAvailablePositionQuantity(position) + POSITION_EPSILON < quantity) {
-      throw new SenderError('Insufficient available position quantity.');
     }
 
     const order = ctx.db.tradeOrder.insert({
@@ -216,6 +233,7 @@ const placeMarketOrder = spacetimedb.reducer(
       auth0UserId,
       marketId,
       side,
+      executionType,
       orderType: ORDER_TYPE_MARKET,
       status: ORDER_STATUS_OPEN,
       quantity,
@@ -234,51 +252,54 @@ const placeLimitOrder = spacetimedb.reducer(
   {
     marketId: t.u32(),
     side: t.string(),
+    executionType: t.string(),
     quantity: t.f64(),
     limitPrice: t.f64(),
   },
-  (ctx, { marketId, side, quantity, limitPrice }) => {
+  (ctx, { marketId, side, executionType, quantity, limitPrice }) => {
     const { auth0UserId, account } = ensureTradingResourceAccess(ctx);
     requirePositiveQuantity(quantity);
     requirePositivePrice(limitPrice);
+    requireAllowedExecutionType(executionType);
     ensureMarketSnapshot(ctx, marketId);
 
     if (side !== ORDER_SIDE_BUY && side !== ORDER_SIDE_SELL) {
       throw new SenderError('Unsupported order side.');
     }
 
+    if (executionType !== ORDER_EXECUTION_TYPE_OPEN) {
+      throw new SenderError('Use the dedicated close reducer for close orders.');
+    }
+
     const now = ctx.timestamp;
     const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
+    const positionSide = position && Math.abs(position.quantity) > POSITION_EPSILON
+      ? (position.quantity > 0 ? ORDER_SIDE_BUY : ORDER_SIDE_SELL)
+      : undefined;
 
-    if (side === ORDER_SIDE_BUY) {
-      const reserveAmount = quantity * limitPrice;
-
-      if (getAvailableBalance(account) + POSITION_EPSILON < reserveAmount) {
-        throw new SenderError('Insufficient available balance to place this limit order.');
-      }
-
-      account.reservedBalance += reserveAmount;
-      account.updatedAt = now;
-      ctx.db.tradingAccount.auth0UserId.update(account);
-    } else {
-      if (getAvailablePositionQuantity(position) + POSITION_EPSILON < quantity) {
-        throw new SenderError('Insufficient available position quantity to place this limit order.');
-      }
-
-      if (!position) {
-        throw new SenderError('No position is available for this sell limit order.');
-      }
-
-      position.reservedQuantity += quantity;
-      position.updatedAt = now;
-      ctx.db.tradingPosition.id.update(position);
+    if (positionSide && positionSide !== side) {
+      throw new SenderError('Close the current position before opening the opposite side.');
     }
+
+    const accountLeverage = account.accountLeverage && account.accountLeverage > 0
+      ? account.accountLeverage
+      : DEFAULT_ACCOUNT_LEVERAGE;
+    const reserveAmount = (quantity * limitPrice) / accountLeverage;
+
+    if (computeTradingAccountState(ctx, auth0UserId).freeMargin + POSITION_EPSILON < reserveAmount) {
+      throw new SenderError('Insufficient free margin to place this limit order.');
+    }
+
+    account.reservedBalance += reserveAmount;
+    account.updatedAt = now;
+    ctx.db.tradingAccount.auth0UserId.update(account);
 
     const order = ctx.db.tradeOrder.insert({
       id: BigInt(0),
       auth0UserId,
       marketId,
       side,
+      executionType,
       orderType: ORDER_TYPE_LIMIT,
       status: ORDER_STATUS_OPEN,
       quantity,
@@ -294,6 +315,50 @@ const placeLimitOrder = spacetimedb.reducer(
     if (execution) {
       fillTradeOrder(ctx, order.id, execution.averageFillPrice, now);
     }
+  }
+);
+
+const closeMarketPosition = spacetimedb.reducer(
+  {
+    marketId: t.u32(),
+    quantity: t.f64(),
+  },
+  (ctx, { marketId, quantity }) => {
+    const { auth0UserId } = ensureTradingResourceAccess(ctx);
+    requirePositiveQuantity(quantity);
+    ensureMarketSnapshot(ctx, marketId);
+
+    const now = ctx.timestamp;
+    const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
+
+    if (!position || getAvailablePositionQuantity(position) + POSITION_EPSILON < quantity) {
+      throw new SenderError('Insufficient available position quantity to close.');
+    }
+
+    const side = position.quantity > 0 ? ORDER_SIDE_SELL : ORDER_SIDE_BUY;
+    const execution = executeAgainstOrderBook(ctx, marketId, side, quantity, undefined, now);
+
+    if (!execution) {
+      throw new SenderError('Insufficient order book size to close this position.');
+    }
+
+    const order = ctx.db.tradeOrder.insert({
+      id: BigInt(0),
+      auth0UserId,
+      marketId,
+      side,
+      executionType: ORDER_EXECUTION_TYPE_CLOSE,
+      orderType: ORDER_TYPE_MARKET,
+      status: ORDER_STATUS_OPEN,
+      quantity,
+      limitPrice: undefined,
+      filledPrice: undefined,
+      createdAt: now,
+      updatedAt: now,
+      filledAt: undefined,
+    });
+
+    fillTradeOrder(ctx, order.id, execution.averageFillPrice, now);
   }
 );
 
@@ -314,9 +379,15 @@ const cancelOrder = spacetimedb.reducer(
     const now = ctx.timestamp;
 
     if (order.orderType === ORDER_TYPE_LIMIT) {
-      if (order.side === ORDER_SIDE_BUY) {
+      if (order.executionType === ORDER_EXECUTION_TYPE_OPEN) {
         const account = ensureTradingAccount(ctx, auth0UserId);
-        account.reservedBalance = Math.max(0, account.reservedBalance - order.quantity * (order.limitPrice ?? 0));
+        const accountLeverage = account.accountLeverage && account.accountLeverage > 0
+          ? account.accountLeverage
+          : DEFAULT_ACCOUNT_LEVERAGE;
+        account.reservedBalance = Math.max(
+          0,
+          account.reservedBalance - ((order.quantity * (order.limitPrice ?? 0)) / accountLeverage)
+        );
         account.updatedAt = now;
         ctx.db.tradingAccount.auth0UserId.update(account);
       } else {
@@ -404,6 +475,7 @@ const deleteNotification = spacetimedb.reducer(
 
 export {
   cancelOrder,
+  closeMarketPosition,
   createPriceAlert,
   currentUserCanTrade,
   currentUserExists,
@@ -412,6 +484,7 @@ export {
   myMarketOrders,
   myMarketPositionState,
   myNotifications,
+  myOpenPositionLots,
   myPositionHistory,
   myPriceAlerts,
   myTradingAccountState,

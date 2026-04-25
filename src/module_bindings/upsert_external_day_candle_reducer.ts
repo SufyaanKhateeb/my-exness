@@ -12,7 +12,10 @@ import {
 
 export default {
   marketId: __t.u32(),
-  side: __t.string(),
-  executionType: __t.string(),
-  quantity: __t.f64(),
+  bucketStartMillis: __t.u64(),
+  open: __t.f64(),
+  high: __t.f64(),
+  low: __t.f64(),
+  close: __t.f64(),
+  volume: __t.f64(),
 };

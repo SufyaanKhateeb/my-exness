@@ -1,19 +1,25 @@
 import spacetimedb from './module';
+import { isSyntheticMarketDataMode } from './simulator-config';
 import { ensureAuth0Jwt } from './simulator-auth';
 import { seedSimulator } from './simulation-runtime';
 
 const init = spacetimedb.init(ctx => {
-  seedSimulator(ctx);
+  if (isSyntheticMarketDataMode()) {
+    seedSimulator(ctx);
+  }
 });
 
 const onConnect = spacetimedb.clientConnected(ctx => {
   if (
-    ctx.db.market.count() === BigInt(0) ||
-    ctx.db.marketSnapshot.count() === BigInt(0) ||
-    ctx.db.marketOrderBookLevel.count() === BigInt(0) ||
-    ctx.db.marketState.count() === BigInt(0) ||
-    ctx.db.marketTickSchedule.count() === BigInt(0) ||
-    ctx.db.simulatorState.count() === BigInt(0)
+    isSyntheticMarketDataMode() &&
+    (
+      ctx.db.market.count() === BigInt(0) ||
+      ctx.db.marketSnapshot.count() === BigInt(0) ||
+      ctx.db.marketOrderBookLevel.count() === BigInt(0) ||
+      ctx.db.marketState.count() === BigInt(0) ||
+      ctx.db.marketTickSchedule.count() === BigInt(0) ||
+      ctx.db.simulatorState.count() === BigInt(0)
+    )
   ) {
     seedSimulator(ctx);
   }

@@ -2,7 +2,7 @@ import spacetimedb, {
   bindTickMarketsReducer,
   marketTickScheduleRow,
 } from './module';
-import { RESET_SIMULATION_PERMISSION } from './simulator-config';
+import { isSyntheticMarketDataMode, RESET_SIMULATION_PERMISSION } from './simulator-config';
 import { ensurePermission } from './simulator-auth';
 import { resetSimulationState, tickAllMarkets } from './simulation-runtime';
 
@@ -14,6 +14,10 @@ const resetSimulation = spacetimedb.reducer(ctx => {
 const tickMarkets = spacetimedb.reducer(
   { arg: marketTickScheduleRow },
   ctx => {
+    if (!isSyntheticMarketDataMode()) {
+      return;
+    }
+
     // if (ctx.sender != ctx.identity) {
     //   throw new SenderError('tickMarkets reducer can only be called by the scheduler');
     // }

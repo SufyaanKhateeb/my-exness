@@ -2,6 +2,7 @@ import { ScheduleAt } from 'spacetimedb';
 
 import {
   DEFAULT_ACCOUNT_BALANCE,
+  isSyntheticMarketDataMode,
   MINUTE_HISTORY_COUNT,
   MS_PER_MINUTE,
   QUOTE_INTERVAL_MS,
@@ -23,6 +24,10 @@ import {
 } from './simulator-market';
 
 function seedSimulator(ctx: ExchangeCtx) {
+  if (!isSyntheticMarketDataMode()) {
+    return;
+  }
+
   if (
     ctx.db.market.count() > BigInt(0) ||
     ctx.db.marketSnapshot.count() > BigInt(0) ||
@@ -165,8 +170,16 @@ function resetSimulationState(ctx: ExchangeCtx) {
     ctx.db.tradeOrder.delete(order);
   }
 
+  for (const positionHistory of Array.from(ctx.db.positionHistory.iter())) {
+    ctx.db.positionHistory.delete(positionHistory);
+  }
+
   for (const position of Array.from(ctx.db.tradingPosition.iter())) {
     ctx.db.tradingPosition.delete(position);
+  }
+
+  for (const positionLot of Array.from(ctx.db.tradingPositionLot.iter())) {
+    ctx.db.tradingPositionLot.delete(positionLot);
   }
 
   for (const account of Array.from(ctx.db.tradingAccount.iter())) {
@@ -188,10 +201,16 @@ function resetSimulationState(ctx: ExchangeCtx) {
     ctx.db.market.delete(market);
   }
 
-  seedSimulator(ctx);
+  if (isSyntheticMarketDataMode()) {
+    seedSimulator(ctx);
+  }
 }
 
 function tickAllMarkets(ctx: ExchangeCtx) {
+  if (!isSyntheticMarketDataMode()) {
+    return;
+  }
+
   const simulator = ctx.db.simulatorState.id.find(1);
   if (!simulator) {
     seedSimulator(ctx);

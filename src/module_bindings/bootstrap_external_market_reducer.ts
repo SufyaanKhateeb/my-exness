@@ -12,7 +12,12 @@ import {
 
 export default {
   marketId: __t.u32(),
-  side: __t.string(),
-  executionType: __t.string(),
-  quantity: __t.f64(),
+  symbol: __t.string(),
+  baseAsset: __t.string(),
+  quoteAsset: __t.string(),
+  assetClass: __t.string(),
+  precision: __t.u8(),
+  spreadBps: __t.f64(),
+  changeRate: __t.f64(),
+  quoteIntervalMs: __t.u32(),
 };

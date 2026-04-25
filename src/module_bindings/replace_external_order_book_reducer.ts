@@ -10,9 +10,17 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+import {
+  ExternalOrderBookLevelInput,
+} from "./types";
+
 export default {
   marketId: __t.u32(),
-  side: __t.string(),
-  executionType: __t.string(),
-  quantity: __t.f64(),
+  updatedAtMillis: __t.u64(),
+  get bids() {
+    return __t.array(ExternalOrderBookLevelInput);
+  },
+  get asks() {
+    return __t.array(ExternalOrderBookLevelInput);
+  },
 };

@@ -9,6 +9,8 @@ import {
 
 const ORDER_SIDE_BUY = 'buy';
 const ORDER_SIDE_SELL = 'sell';
+const ORDER_EXECUTION_TYPE_OPEN = 'open';
+const ORDER_EXECUTION_TYPE_CLOSE = 'close';
 const ORDER_TYPE_MARKET = 'market';
 const ORDER_TYPE_LIMIT = 'limit';
 const ORDER_STATUS_OPEN = 'open';
@@ -87,10 +89,24 @@ const marketPositionStateRow = t.row('MarketPositionState', {
   updatedAt: t.timestamp(),
 });
 
+const openPositionLotStateRow = t.row('OpenPositionLotState', {
+  id: t.u64(),
+  auth0UserId: t.string(),
+  marketId: t.u32(),
+  side: t.string(),
+  quantity: t.f64(),
+  openPrice: t.f64(),
+  currentPrice: t.f64(),
+  unrealizedPnl: t.f64(),
+  openedAt: t.timestamp(),
+  updatedAt: t.timestamp(),
+});
+
 const marketOrderStateRow = t.row('MarketOrderState', {
   id: t.u64(),
   marketId: t.u32(),
   side: t.string(),
+  executionType: t.string(),
   orderType: t.string(),
   status: t.string(),
   quantity: t.f64(),
@@ -167,11 +183,23 @@ const tradingPositionRow = t.row('TradingPosition', {
   updatedAt: t.timestamp(),
 });
 
+const tradingPositionLotRow = t.row('TradingPositionLot', {
+  id: t.u64().primaryKey().autoInc(),
+  auth0UserId: t.string().index(),
+  marketId: t.u32().index(),
+  side: t.string(),
+  quantity: t.f64(),
+  openPrice: t.f64(),
+  openedAt: t.timestamp(),
+  updatedAt: t.timestamp(),
+});
+
 const tradeOrderRow = t.row('TradeOrder', {
   id: t.u64().primaryKey().autoInc(),
   auth0UserId: t.string().index(),
   marketId: t.u32().index(),
   side: t.string(),
+  executionType: t.string(),
   orderType: t.string(),
   status: t.string().index(),
   quantity: t.f64(),
@@ -244,6 +272,12 @@ const spacetimedb = schema({
       name: 'trading_position',
     },
     tradingPositionRow
+  ),
+  tradingPositionLot: table(
+    {
+      name: 'trading_position_lot',
+    },
+    tradingPositionLotRow
   ),
   tradeOrder: table(
     {
@@ -382,6 +416,7 @@ type ExchangeCtx = ReducerCtx<typeof spacetimedb.schemaType>;
 type ExchangeViewCtx = ViewCtx<typeof spacetimedb.schemaType>;
 type TradingReadCtx = { db: ExchangeCtx['db'] | ExchangeViewCtx['db'] };
 type NotificationRowType = Infer<typeof notificationRow>;
+type OpenPositionLotRowType = Infer<typeof tradingPositionLotRow>;
 type PriceAlertRowType = Infer<typeof priceAlertRow>;
 type TradingAccountRowType = Infer<typeof tradingAccountRow>;
 type TradingPositionRowType = Infer<typeof tradingPositionRow>;
@@ -389,6 +424,8 @@ type TradeOrderRowType = Infer<typeof tradeOrderRow>;
 
 export default spacetimedb;
 export {
+  ORDER_EXECUTION_TYPE_CLOSE,
+  ORDER_EXECUTION_TYPE_OPEN,
   NOTIFICATION_KIND_PRICE_ALERT_EXPIRED,
   NOTIFICATION_KIND_PRICE_ALERT_TRIGGERED,
   NOTIFICATION_LEVEL_INFO,
@@ -416,6 +453,7 @@ export {
   marketTickScheduleRow,
   notificationRow,
   notificationStateRow,
+  openPositionLotStateRow,
   positionHistoryRow,
   positionHistoryStateRow,
   priceAlertRow,
@@ -423,6 +461,7 @@ export {
   tradeOrderRow,
   tradingAccountRow,
   tradingAccountStateRow,
+  tradingPositionLotRow,
   tradingPositionRow,
   userProfileRow,
 };
@@ -430,6 +469,7 @@ export type {
   ExchangeCtx,
   ExchangeViewCtx,
   NotificationRowType,
+  OpenPositionLotRowType,
   PriceAlertRowType,
   TradeOrderRowType,
   TradingAccountRowType,

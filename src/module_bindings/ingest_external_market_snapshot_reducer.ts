@@ -12,7 +12,11 @@ import {
 
 export default {
   marketId: __t.u32(),
-  side: __t.string(),
-  executionType: __t.string(),
-  quantity: __t.f64(),
+  price: __t.f64(),
+  open24H: __t.f64(),
+  high24H: __t.f64(),
+  low24H: __t.f64(),
+  change24H: __t.f64(),
+  volume24H: __t.f64(),
+  updatedAtMillis: __t.u64(),
 };

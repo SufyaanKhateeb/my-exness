@@ -6,11 +6,13 @@ import { useReducer, useSpacetimeDB, useTable } from 'spacetimedb/react';
 
 import LoginButton from '@/components/LoginButton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatPrice } from '@/lib/market-terminal';
 import { DbConnection, reducers, tables } from '@/src/module_bindings';
 
 const ORDER_SIDE_BUY = 'buy';
 const ORDER_SIDE_SELL = 'sell';
+const ORDER_EXECUTION_TYPE_OPEN = 'open';
 const ORDER_TYPE_MARKET = 'market';
 const ORDER_TYPE_LIMIT = 'limit';
 const ORDER_STATUS_OPEN = 'open';
@@ -89,6 +91,7 @@ type MarketOrderState = {
   id: bigint;
   marketId: number;
   side: string;
+  executionType: string;
   orderType: string;
   status: string;
   quantity: number;
@@ -134,6 +137,19 @@ type PositionHistoryState = {
   exitPrice: number;
   realizedPnl: number;
   closedAt: { toMillis(): bigint };
+};
+
+type OpenPositionLotState = {
+  id: bigint;
+  auth0UserId: string;
+  marketId: number;
+  side: string;
+  quantity: number;
+  openPrice: number;
+  currentPrice: number;
+  unrealizedPnl: number;
+  openedAt: { toMillis(): bigint };
+  updatedAt: { toMillis(): bigint };
 };
 
 function formatSignedCurrencyAmount(value: number, currency: string) {
@@ -184,6 +200,7 @@ export function LiveTradingPanel({
   const { getConnection, isActive } = useSpacetimeDB();
   const placeMarketOrder = useReducer(reducers.placeMarketOrder);
   const placeLimitOrder = useReducer(reducers.placeLimitOrder);
+  const closeMarketPosition = useReducer(reducers.closeMarketPosition);
   const cancelOrder = useReducer(reducers.cancelOrder);
   const createPriceAlert = useReducer(reducers.createPriceAlert);
   const deletePriceAlert = useReducer(reducers.deletePriceAlert);
@@ -193,6 +210,7 @@ export function LiveTradingPanel({
   const [limitPriceInput, setLimitPriceInput] = useState('');
   const [alertPriceInput, setAlertPriceInput] = useState('');
   const [positionTab, setPositionTab] = useState('open');
+  const [showGroupedPositions, setShowGroupedPositions] = useState(false);
   const [isModifyDialogOpen, setIsModifyDialogOpen] = useState(false);
   const [partialCloseInput, setPartialCloseInput] = useState(() => getDefaultTradeQuantity(baseAsset));
   const [alertReferenceKind, setAlertReferenceKind] = useState<
@@ -219,6 +237,9 @@ export function LiveTradingPanel({
   const [ordersRows, ordersReady] = useTable(
     tables.myMarketOrders.where(order => order.marketId.eq(marketId))
   );
+  const [openPositionLotRows, openPositionLotsReady] = useTable(
+    tables.myOpenPositionLots.where(positionLot => positionLot.marketId.eq(marketId))
+  );
   const [positionHistoryRows, positionHistoryReady] = useTable(
     tables.myPositionHistory.where(positionHistory => positionHistory.marketId.eq(marketId))
   );
@@ -228,6 +249,7 @@ export function LiveTradingPanel({
   const accountState = (accountRows[0] as TradingAccountState | undefined) ?? null;
   const positionState = (positionRows[0] as MarketPositionState | undefined) ?? null;
   const ordersState = ordersRows as readonly MarketOrderState[];
+  const openPositionLots = openPositionLotRows as readonly OpenPositionLotState[];
   const positionHistoryState = positionHistoryRows as readonly PositionHistoryState[];
   const priceAlerts = priceAlertRows as readonly PriceAlertState[];
   const currency = accountState?.currency ?? quoteAsset;
@@ -240,6 +262,24 @@ export function LiveTradingPanel({
     () => ordersState.filter(order => order.status === ORDER_STATUS_OPEN),
     [ordersState]
   );
+  const groupedPositionSide = positionState
+    ? positionState.quantity >= 0
+      ? ORDER_SIDE_BUY
+      : ORDER_SIDE_SELL
+    : ORDER_SIDE_BUY;
+  const groupedOpenPositionOpenedAt = useMemo(() => {
+    if (openPositionLots.length === 0) {
+      return undefined;
+    }
+
+    return openPositionLots.reduce((earliest, lot) => {
+      if (!earliest) {
+        return lot.openedAt;
+      }
+
+      return lot.openedAt.toMillis() < earliest.toMillis() ? lot.openedAt : earliest;
+    }, undefined as OpenPositionLotState['openedAt'] | undefined);
+  }, [openPositionLots]);
   const { bestBid, bestAsk } = useMemo(() => {
     const orderBookLevels = levels as readonly MarketOrderBookLevel[];
     const bid = orderBookLevels
@@ -310,7 +350,7 @@ export function LiveTradingPanel({
 
   const isTradingStateReady = !user
     ? false
-    : hasTradingAccessResolved && accountReady && positionReady && ordersReady && positionHistoryReady && priceAlertsReady && levelsReady;
+    : hasTradingAccessResolved && accountReady && positionReady && ordersReady && openPositionLotsReady && positionHistoryReady && priceAlertsReady && levelsReady;
 
   async function handleSubmitOrder() {
     setErrorMessage(null);
@@ -329,6 +369,7 @@ export function LiveTradingPanel({
         await placeMarketOrder({
           marketId,
           side,
+          executionType: ORDER_EXECUTION_TYPE_OPEN,
           quantity,
         });
       } else {
@@ -342,6 +383,7 @@ export function LiveTradingPanel({
         await placeLimitOrder({
           marketId,
           side,
+          executionType: ORDER_EXECUTION_TYPE_OPEN,
           quantity,
           limitPrice,
         });
@@ -381,9 +423,8 @@ export function LiveTradingPanel({
     setIsSubmitting(true);
 
     try {
-      await placeMarketOrder({
+      await closeMarketPosition({
         marketId,
-        side: ORDER_SIDE_SELL,
         quantity,
       });
       setIsModifyDialogOpen(false);
@@ -818,47 +859,95 @@ export function LiveTradingPanel({
           </TabsList>
 
           <TabsContent value="open" className="space-y-2">
-            {positionState && positionState.availableQuantity > 0 ? (
-              <div className="rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium text-white">
-                      {positionState.availableQuantity.toFixed(4)} {baseAsset}
+              {positionState && positionState.availableQuantity > 0 ? (
+                <div className="space-y-3 rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs text-slate-500">
+                      {showGroupedPositions
+                        ? `Grouped ${openPositionLots.length} open trade${openPositionLots.length === 1 ? '' : 's'}`
+                        : `Showing ${openPositionLots.length} individual trade${openPositionLots.length === 1 ? '' : 's'}`}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      Avg {formatPrice(positionState.averageEntryPrice, precision)} · Mark {formatPrice(positionState.markPrice, precision)}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      Unrealized {formatSignedCurrencyAmount(positionState.unrealizedPnl, currency)}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowGroupedPositions(current => !current)}
+                        className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-100"
+                      >
+                        {showGroupedPositions ? 'Show individual positions' : 'Group positions'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          void handleCloseOpenPosition(positionState.availableQuantity);
+                        }}
+                        className="rounded-full border border-rose-400/20 bg-rose-400/10 px-3 py-1.5 text-[11px] text-rose-100 transition hover:bg-rose-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isSubmitting ? 'Closing...' : 'Close grouped'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPartialCloseInput(
+                            Math.min(Number.parseFloat(defaultTradeQuantity), positionState.availableQuantity).toString()
+                          );
+                          setIsModifyDialogOpen(true);
+                        }}
+                        className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-100"
+                      >
+                        Modify grouped
+                      </button>
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => {
-                        void handleCloseOpenPosition(positionState.availableQuantity);
-                      }}
-                      className="rounded-full border border-rose-400/20 bg-rose-400/10 px-3 py-1.5 text-[11px] text-rose-100 transition hover:bg-rose-400/15 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isSubmitting ? 'Closing...' : 'Close position'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPartialCloseInput(
-                          Math.min(Number.parseFloat(defaultTradeQuantity), positionState.availableQuantity).toString()
-                        );
-                        setIsModifyDialogOpen(true);
-                      }}
-                      className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-100"
-                    >
-                      Modify position
-                    </button>
-                  </div>
+
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Symbol</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="text-right">Volume</TableHead>
+                        <TableHead className="text-right">Open Price</TableHead>
+                        <TableHead className="text-right">Current Price</TableHead>
+                        <TableHead>Open Time</TableHead>
+                        <TableHead className="text-right">P/L</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {showGroupedPositions ? (
+                        <TableRow>
+                          <TableCell>{marketSymbol}</TableCell>
+                          <TableCell className={groupedPositionSide === ORDER_SIDE_BUY ? 'text-emerald-300' : 'text-rose-300'}>
+                            {groupedPositionSide}
+                          </TableCell>
+                          <TableCell className="text-right">{positionState.availableQuantity.toFixed(4)}</TableCell>
+                          <TableCell className="text-right">{formatPrice(positionState.averageEntryPrice, precision)}</TableCell>
+                          <TableCell className="text-right">{formatPrice(positionState.markPrice, precision)}</TableCell>
+                          <TableCell>{formatAlertTimestamp(groupedOpenPositionOpenedAt)}</TableCell>
+                          <TableCell className={`text-right ${positionState.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                            {formatSignedCurrencyAmount(positionState.unrealizedPnl, currency)}
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        openPositionLots.map(positionLot => (
+                          <TableRow key={positionLot.id.toString()}>
+                            <TableCell>{marketSymbol}</TableCell>
+                            <TableCell className={positionLot.side === ORDER_SIDE_BUY ? 'text-emerald-300' : 'text-rose-300'}>
+                              {positionLot.side}
+                            </TableCell>
+                            <TableCell className="text-right">{positionLot.quantity.toFixed(4)}</TableCell>
+                            <TableCell className="text-right">{formatPrice(positionLot.openPrice, precision)}</TableCell>
+                            <TableCell className="text-right">{formatPrice(positionLot.currentPrice, precision)}</TableCell>
+                            <TableCell>{formatAlertTimestamp(positionLot.openedAt)}</TableCell>
+                            <TableCell className={`text-right ${positionLot.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                              {formatSignedCurrencyAmount(positionLot.unrealizedPnl, currency)}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
                 </div>
-              </div>
-            ) : (
+              ) : (
               <div className="rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-slate-500">
                 No open positions for this market.
               </div>
@@ -879,7 +968,7 @@ export function LiveTradingPanel({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className={`text-sm font-medium ${sideClass}`}>
-                          {order.side === ORDER_SIDE_BUY ? 'Buy' : 'Sell'} {order.quantity.toFixed(4)} {baseAsset}
+                          {order.executionType === ORDER_EXECUTION_TYPE_OPEN ? 'Open' : 'Close'} {order.side === ORDER_SIDE_BUY ? 'Buy' : 'Sell'} {order.quantity.toFixed(4)} {baseAsset}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
                           {order.orderType} @ {formatPrice(order.limitPrice ?? snapshot?.price ?? 0, precision)}
@@ -992,7 +1081,7 @@ export function LiveTradingPanel({
                 }}
                 className="flex-1 rounded-2xl bg-rose-400/15 px-4 py-3 text-sm font-medium text-rose-100 transition hover:bg-rose-400/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isSubmitting ? 'Closing...' : 'Sell to close'}
+                {isSubmitting ? 'Closing...' : positionState.quantity >= 0 ? 'Sell to close' : 'Buy to close'}
               </button>
             </div>
           </div>
