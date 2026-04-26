@@ -7,7 +7,7 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-400">
+      <div className="h-screen flex flex-col relative max-w-400">
         <AppHeader />
         <section className="h-full p-0 overflow-scroll">
           <MarketTerminal />
