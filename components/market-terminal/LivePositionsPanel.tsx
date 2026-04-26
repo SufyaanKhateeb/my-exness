@@ -303,7 +303,7 @@ export function LivePositionsPanel({
 
   if (!user) {
     return (
-      <Card className="rounded-[24px] border-white/8 bg-[#08111d] text-slate-300 shadow-none">
+      <Card className="bg-transparent border-none text-primary shadow-none">
         <CardHeader className="p-4 pb-0">
           <CardTitle className="text-sm font-medium text-white">Sign in to view positions</CardTitle>
         </CardHeader>
@@ -311,7 +311,6 @@ export function LivePositionsPanel({
           <p className="text-sm leading-6 text-slate-400">
             Authentication unlocks your simulated open positions, pending orders, and closed history.
           </p>
-          <LoginButton />
         </CardContent>
       </Card>
     );
@@ -319,7 +318,7 @@ export function LivePositionsPanel({
 
   if (!isTradingStateReady) {
     return (
-      <Card className="rounded-[24px] border-white/8 bg-[#08111d] text-slate-300 shadow-none">
+      <Card className="bg-transparent border-none text-primary shadow-none">
         <CardContent className="p-4 text-sm text-slate-400">
           <div className="flex items-center gap-3">
             <Spinner className="size-4" />
@@ -332,7 +331,7 @@ export function LivePositionsPanel({
 
   if (!hasTradingAccess || !accountState) {
     return (
-      <Card className="rounded-[24px] border-white/8 bg-[#08111d] text-slate-300 shadow-none">
+      <Card className="bg-transparent border-none text-primary shadow-none">
         <CardHeader className="p-4 pb-0">
           <CardTitle className="text-sm font-medium text-white">Position data unavailable</CardTitle>
         </CardHeader>

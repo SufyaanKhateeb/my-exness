@@ -17,6 +17,8 @@ const DB_NAME = process.env.NEXT_PUBLIC_SPACETIMEDB_DB_NAME ?? 'nextjs-ts';
 const AUTH0_AUDIENCE = process.env.NEXT_PUBLIC_AUTH0_AUDIENCE;
 const AUTH0_SCOPE = process.env.NEXT_PUBLIC_AUTH0_SCOPE;
 const TOKEN_KEY = `${HOST}/${DB_NAME}/auth_token`;
+const HIDDEN_DURATION_THRESHOLD_MS = 30_000;
+const RECONNECT_COOLDOWN_MS = 2_000;
 
 function createConnectionState(
   kind: ConnectionHealthState['kind'],
@@ -106,6 +108,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useUser();
   const [auth0Token, setAuth0Token] = useState<string | null>(null);
   const [isAuth0TokenReady, setIsAuth0TokenReady] = useState(false);
+  const [reconnectGeneration, setReconnectGeneration] = useState(0);
   const [connectionState, setConnectionState] = useState<ConnectionHealthState>(() =>
     createConnectionState(
       'dropped',
@@ -113,6 +116,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       'SpacetimeDB has not confirmed an active connection yet.'
     )
   );
+  const connectionStateRef = useRef(connectionState);
+  const lastHiddenAtRef = useRef<number | null>(null);
+  const lastReconnectAtRef = useRef(0);
 
   const handleConnect = useCallback((_conn: DbConnection, identity: Identity, token: string) => {
     if (typeof window !== 'undefined') {
@@ -126,11 +132,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         `Connected identity ${identity.toHexString()}.`
       )
     );
-
-    console.log('[spacetimedb-client] Connected to SpacetimeDB', {
-      identity: identity.toHexString(),
-      receivedToken: Boolean(token),
-    });
+    console.log('connected');
   }, []);
 
   const handleDisconnect = useCallback(() => {
@@ -145,8 +147,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
           : 'Waiting for the initial SpacetimeDB websocket handshake.'
       )
     );
-
-    console.log('[spacetimedb-client] Disconnected from SpacetimeDB');
   }, []);
 
   const handleConnectError = useCallback((_ctx: ErrorContext, err: Error) => {
@@ -160,6 +160,65 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
     console.log('[spacetimedb-client] Error connecting to SpacetimeDB:', err);
   }, []);
+
+  useEffect(() => {
+    connectionStateRef.current = connectionState;
+  }, [connectionState]);
+
+  const requestReconnect = useCallback((reason: string, detail: string) => {
+    const now = Date.now();
+
+    if (now - lastReconnectAtRef.current < RECONNECT_COOLDOWN_MS) {
+      return;
+    }
+
+    lastReconnectAtRef.current = now;
+    setConnectionState(createConnectionState('dropped', reason, detail));
+    setReconnectGeneration(currentValue => currentValue + 1);
+  }, []);
+
+  useEffect(() => {
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      const hiddenDuration = lastHiddenAtRef.current
+        ? Date.now() - lastHiddenAtRef.current
+        : 0;
+      const connectionKind = connectionStateRef.current.kind;
+      const shouldReconnect =
+        hiddenDuration >= HIDDEN_DURATION_THRESHOLD_MS || connectionKind !== 'live';
+
+      lastHiddenAtRef.current = null;
+
+      if (!shouldReconnect) {
+        return;
+      }
+
+      requestReconnect(
+        'Connection paused during sleep.',
+        'Reconnecting to SpacetimeDB after the page became active again.'
+      );
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        lastHiddenAtRef.current = Date.now();
+        return;
+      }
+
+      handleVisibilityOrFocus();
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [requestReconnect]);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,30 +260,28 @@ export function Providers({ children }: { children: React.ReactNode }) {
     };
   }, [user]);
 
-  const connectionToken = useMemo(() => {
-    if (user) {
-      return auth0Token ?? undefined;
-    }
-
-    if (typeof window === 'undefined') {
-      return undefined;
-    }
-
-    return localStorage.getItem(TOKEN_KEY) || undefined;
-  }, [auth0Token, user]);
-
   const connectionBuilder = useMemo(
     () => {
-      return DbConnection.builder()
-        .withUri(HOST)
-        .withDatabaseName(DB_NAME)
-        .withToken(connectionToken)
-        .withCompression('gzip')
-        .onConnect(handleConnect)
-        .onDisconnect(handleDisconnect)
-        .onConnectError(handleConnectError);
+      if(reconnectGeneration >= 0 && user && auth0Token) {
+          return DbConnection.builder()
+            .withUri(HOST)
+            .withDatabaseName(DB_NAME)
+            .withToken(auth0Token)
+            .withCompression('gzip')
+            .onConnect(handleConnect)
+            .onDisconnect(handleDisconnect)
+            .onConnectError(handleConnectError);
+      } else {
+          return DbConnection.builder()
+            .withUri(HOST)
+            .withDatabaseName(DB_NAME)
+            .withCompression('gzip')
+            .onConnect(handleConnect)
+            .onDisconnect(handleDisconnect)
+            .onConnectError(handleConnectError);
+      }
     },
-    [connectionToken, handleConnect, handleConnectError, handleDisconnect]
+    [handleConnect, handleConnectError, handleDisconnect, user, reconnectGeneration, auth0Token]
   );
 
   if (isLoading || (user && !isAuth0TokenReady)) {
@@ -244,7 +301,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <>
       <SpacetimeDBProvider
-        key={user ? `auth0:${connectionToken ?? 'missing-token'}` : 'anonymous'}
+        // key={user ? `auth0:${connectionToken ?? 'missing-token'}` : 'anonymous'}
         connectionBuilder={connectionBuilder}
       >
         <Auth0UserSync user={user ?? undefined}>
