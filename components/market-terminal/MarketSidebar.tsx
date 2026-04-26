@@ -4,7 +4,7 @@ import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -58,7 +58,7 @@ export function MarketSidebar({
   }, [markets, query]);
 
   return (
-    <Card className="rounded-3xl border-border/70 shadow-sm">
+    <>
       <CardHeader className="gap-4 p-4 pb-0 xl:p-5 xl:pb-0">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
@@ -86,13 +86,13 @@ export function MarketSidebar({
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="px-3">Symbol</TableHead>
-                <TableHead className="w-14 px-2 text-center">Signal</TableHead>
-                <TableHead className="px-3 text-right">Bid</TableHead>
-                <TableHead className="px-3 text-right">Spread</TableHead>
-                <TableHead className="px-3 text-right">Ask</TableHead>
-                <TableHead className="px-3 text-right">1 Day</TableHead>
-                <TableHead className="px-3 text-right">P/L</TableHead>
+                <TableHead className="h-8 px-2.5">Symbol</TableHead>
+                <TableHead className="h-8 w-12 px-1.5 text-center">Signal</TableHead>
+                <TableHead className="h-8 px-2.5 text-right">Bid</TableHead>
+                <TableHead className="h-8 px-2.5 text-right">Spread</TableHead>
+                <TableHead className="h-8 px-2.5 text-right">Ask</TableHead>
+                <TableHead className="h-8 px-2.5 text-right">1 Day</TableHead>
+                <TableHead className="h-8 px-2.5 text-right">P/L</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -115,16 +115,16 @@ export function MarketSidebar({
                       onClick={() => onSelectMarket(market.id)}
                       className="cursor-pointer"
                     >
-                      <TableCell className="px-3 py-3">
-                        <div className="text-sm font-semibold text-foreground">{market.symbol}</div>
-                        <div className="mt-1 text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                      <TableCell className="px-2.5 py-2 align-top">
+                        <div className="text-xs font-semibold leading-tight text-foreground">{market.symbol}</div>
+                        <div className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                           {market.assetClass}
                         </div>
                       </TableCell>
-                      <TableCell className="px-2 py-3 text-center">
+                      <TableCell className="px-1.5 py-2 text-center">
                         <span
                           className={cn(
-                            'inline-flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold',
+                            'inline-flex h-5.5 w-5.5 items-center justify-center rounded-full border text-[10px] font-semibold',
                             positive
                               ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                               : 'border-destructive/30 bg-destructive/10 text-destructive'
@@ -133,18 +133,18 @@ export function MarketSidebar({
                           {positive ? '↑' : '↓'}
                         </span>
                       </TableCell>
-                      <TableCell className="px-3 py-3 text-right text-sm font-medium text-foreground">
+                      <TableCell className="px-2.5 py-2 text-right text-xs font-medium text-foreground">
                         {formatPrice(market.bid, market.precision)}
                       </TableCell>
-                      <TableCell className="px-3 py-3 text-right text-sm text-muted-foreground">
+                      <TableCell className="px-2.5 py-2 text-right text-[11px] text-muted-foreground">
                         {formatPrice(market.spread, market.precision)}
                       </TableCell>
-                      <TableCell className="px-3 py-3 text-right text-sm font-medium text-foreground">
+                      <TableCell className="px-2.5 py-2 text-right text-xs font-medium text-foreground">
                         {formatPrice(market.ask, market.precision)}
                       </TableCell>
                       <TableCell
                         className={cn(
-                          'px-3 py-3 text-right text-sm font-medium',
+                          'px-2.5 py-2 text-right text-xs font-medium',
                           positive ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'
                         )}
                       >
@@ -152,7 +152,7 @@ export function MarketSidebar({
                       </TableCell>
                       <TableCell
                         className={cn(
-                          'px-3 py-3 text-right text-sm font-medium',
+                          'px-2.5 py-2 text-right text-xs font-medium',
                           profitable ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'
                         )}
                       >
@@ -166,6 +166,6 @@ export function MarketSidebar({
           </Table>
         </div>
       </CardContent>
-    </Card>
+    </>
   );
 }

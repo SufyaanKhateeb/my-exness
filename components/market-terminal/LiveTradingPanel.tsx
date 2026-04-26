@@ -50,7 +50,7 @@ function formatCurrencyAmount(value: number, currency: string) {
   }).format(value);
 }
 
-type LiveTradingPanelProps = {
+export type LiveTradingPanelProps = {
   marketId: number;
   marketSymbol: string;
   baseAsset: string;
@@ -58,6 +58,8 @@ type LiveTradingPanelProps = {
   precision: number;
   quoteIntervalMs: number;
 };
+
+type LiveTradingPanelMode = 'ticket' | 'positions';
 
 type TradingAccountState = {
   auth0UserId: string;
@@ -189,13 +191,14 @@ function formatAlertTimestamp(timestamp: { toMillis(): bigint } | undefined) {
   }).format(Number(timestamp.toMillis()));
 }
 
-export function LiveTradingPanel({
+export function LiveTradingPanelView({
   marketId,
   marketSymbol,
   baseAsset,
   quoteAsset,
   precision,
-}: LiveTradingPanelProps) {
+  mode,
+}: LiveTradingPanelProps & { mode: LiveTradingPanelMode }) {
   const { user, isLoading } = useUser();
   const { getConnection, isActive } = useSpacetimeDB();
   const placeMarketOrder = useReducer(reducers.placeMarketOrder);
@@ -258,6 +261,10 @@ export function LiveTradingPanel({
     () => priceAlerts.filter(alert => alert.marketId === marketId),
     [marketId, priceAlerts]
   );
+  const isTicketOnlyPanel = mode === 'ticket';
+  const isPositionsOnlyPanel = mode === 'positions';
+  const showTradingTicket = mode === 'ticket';
+  const showPositionsPanel = mode === 'positions';
   const pendingOrders = useMemo(
     () => ordersState.filter(order => order.status === ORDER_STATUS_OPEN),
     [ordersState]
@@ -505,10 +512,16 @@ export function LiveTradingPanel({
   if (!user) {
     return (
       <aside className="rounded-[24px] border border-white/8 bg-[#08111d] p-4 text-slate-300">
-        <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Trading</p>
-        <h3 className="mt-2 text-sm font-medium text-white">Sign in to place orders</h3>
+        <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
+          {isPositionsOnlyPanel ? 'Positions' : 'Trading'}
+        </p>
+        <h3 className="mt-2 text-sm font-medium text-white">
+          {isPositionsOnlyPanel ? 'Sign in to view positions' : 'Sign in to place orders'}
+        </h3>
         <p className="mt-3 text-sm leading-6 text-slate-400">
-          Authentication unlocks your simulated cash balance, positions, and order ticket.
+          {isPositionsOnlyPanel
+            ? 'Authentication unlocks your simulated open positions, pending orders, and closed history.'
+            : 'Authentication unlocks your simulated cash balance, positions, and order ticket.'}
         </p>
         <div className="mt-4">
           <LoginButton />
@@ -528,10 +541,16 @@ export function LiveTradingPanel({
   if (!hasTradingAccess || !accountState) {
     return (
       <aside className="rounded-[24px] border border-white/8 bg-[#08111d] p-4 text-slate-300">
-        <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Trading</p>
-        <h3 className="mt-2 text-sm font-medium text-white">Trading access unavailable</h3>
+        <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
+          {isPositionsOnlyPanel ? 'Positions' : 'Trading'}
+        </p>
+        <h3 className="mt-2 text-sm font-medium text-white">
+          {isPositionsOnlyPanel ? 'Position data unavailable' : 'Trading access unavailable'}
+        </h3>
         <p className="mt-3 text-sm leading-6 text-slate-400">
-          Your Auth0 session is valid, but no trade-enabled account state is available in SpacetimeDB yet.
+          {isPositionsOnlyPanel
+            ? 'Your Auth0 session is valid, but position state for this account is not available in SpacetimeDB yet.'
+            : 'Your Auth0 session is valid, but no trade-enabled account state is available in SpacetimeDB yet.'}
         </p>
         {errorMessage ? (
           <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">
@@ -544,298 +563,304 @@ export function LiveTradingPanel({
 
   return (
     <aside className="rounded-[24px] border border-white/8 bg-[#08111d] p-4 text-slate-300">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Trading</p>
-          <h3 className="mt-1 text-sm font-medium text-white">{marketSymbol} ticket</h3>
-        </div>
-        <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-300">
-          Last {snapshot ? formatPrice(snapshot.price, precision) : '--'}
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Balance</div>
-          <div className="mt-2 text-sm font-medium text-white">
-            {formatCurrencyAmount(accountState.balance, currency)}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Equity</div>
-          <div className="mt-2 text-sm font-medium text-white">
-            {formatCurrencyAmount(accountState.equity, currency)}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Margin</div>
-          <div className="mt-2 text-sm font-medium text-white">
-            {formatCurrencyAmount(accountState.margin, currency)}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Free Margin</div>
-          <div className="mt-2 text-sm font-medium text-white">
-            {formatCurrencyAmount(accountState.freeMargin, currency)}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Margin Level</div>
-          <div className="mt-2 text-sm font-medium text-white">
-            {accountState.margin > 0 ? formatPercentAmount(accountState.marginLevel) : '—'}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Leverage</div>
-          <div className="mt-2 text-sm font-medium text-white">1:{accountState.accountLeverage}</div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Unrealized</div>
-          <div className="mt-2 text-sm font-medium text-white">
-            <span className={accountState.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
-              {formatSignedCurrencyAmount(accountState.unrealizedPnl, currency)}
-            </span>
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Order Reserve</div>
-          <div className="mt-2 text-sm font-medium text-white">
-            {formatCurrencyAmount(accountState.reservedBalance, currency)}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3 col-span-2">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Position</div>
-          <div className="mt-2 text-sm font-medium text-white">
-            {(positionState?.availableQuantity ?? 0).toFixed(4)} {baseAsset}
-          </div>
-          {positionState && positionState.quantity > 0 ? (
-            <div className="mt-1 text-xs text-slate-500">
-              Avg {formatPrice(positionState.averageEntryPrice, precision)} | Mark {formatPrice(positionState.markPrice, precision)}
+      {showTradingTicket ? (
+        <>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Trading</p>
+              <h3 className="mt-1 text-sm font-medium text-white">
+                {marketSymbol} {isTicketOnlyPanel ? 'order ticket' : 'ticket'}
+              </h3>
             </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-5 flex gap-2 rounded-2xl border border-white/8 bg-white/3 p-1">
-        <button
-          type="button"
-          className={`flex-1 rounded-xl px-3 py-2 text-sm transition ${
-            orderType === ORDER_TYPE_MARKET
-              ? 'bg-cyan-400/15 text-cyan-100'
-              : 'text-slate-400 hover:text-white'
-          }`}
-          onClick={() => setOrderType(ORDER_TYPE_MARKET)}
-        >
-          Market
-        </button>
-        <button
-          type="button"
-          className={`flex-1 rounded-xl px-3 py-2 text-sm transition ${
-            orderType === ORDER_TYPE_LIMIT
-              ? 'bg-cyan-400/15 text-cyan-100'
-              : 'text-slate-400 hover:text-white'
-          }`}
-          onClick={() => setOrderType(ORDER_TYPE_LIMIT)}
-        >
-          Limit
-        </button>
-      </div>
-
-      <div className="mt-3 flex gap-2 rounded-2xl border border-white/8 bg-white/3 p-1">
-        <button
-          type="button"
-          className={`flex-1 rounded-xl px-3 py-2 text-sm transition ${
-            side === ORDER_SIDE_BUY
-              ? 'bg-emerald-400/15 text-emerald-100'
-              : 'text-slate-400 hover:text-white'
-          }`}
-          onClick={() => setSide(ORDER_SIDE_BUY)}
-        >
-          Buy
-        </button>
-        <button
-          type="button"
-          className={`flex-1 rounded-xl px-3 py-2 text-sm transition ${
-            side === ORDER_SIDE_SELL
-              ? 'bg-rose-400/15 text-rose-100'
-              : 'text-slate-400 hover:text-white'
-          }`}
-          onClick={() => setSide(ORDER_SIDE_SELL)}
-        >
-          Sell
-        </button>
-      </div>
-
-      <div className="mt-4 space-y-3">
-        <label className="block">
-          <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
-            Quantity ({baseAsset})
-          </span>
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={quantityInput}
-            onChange={event => setQuantityInput(event.target.value)}
-            className="w-full rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
-            placeholder={`0.00 ${baseAsset}`}
-          />
-        </label>
-
-        {orderType === ORDER_TYPE_LIMIT ? (
-          <label className="block">
-            <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
-              Limit price ({currency})
-            </span>
-            <input
-              type="number"
-              min="0"
-              step="any"
-              value={limitPriceInput}
-              onChange={event => setLimitPriceInput(event.target.value)}
-              className="w-full rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
-              placeholder={snapshot ? formatPrice(snapshot.price, precision) : '0.00'}
-            />
-          </label>
-        ) : null}
-      </div>
-
-      <button
-        type="button"
-        disabled={isSubmitting}
-        onClick={() => {
-          void handleSubmitOrder();
-        }}
-        className={`mt-4 w-full rounded-2xl px-4 py-3 text-sm font-medium transition ${
-          side === ORDER_SIDE_BUY
-            ? 'bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/20'
-            : 'bg-rose-400/15 text-rose-100 hover:bg-rose-400/20'
-        } disabled:cursor-not-allowed disabled:opacity-60`}
-      >
-        {isSubmitting ? 'Submitting...' : `${side === ORDER_SIDE_BUY ? 'Buy' : 'Sell'} ${orderType}`}
-      </button>
-
-      <div className="mt-5 rounded-2xl border border-white/8 bg-white/3 p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Price alerts</div>
-            <div className="mt-1 text-xs text-slate-500">
-              Bid {formatPrice(bestBid, precision)} · Ask {formatPrice(bestAsk, precision)}
+            <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-300">
+              Last {snapshot ? formatPrice(snapshot.price, precision) : '--'}
             </div>
           </div>
-          <div className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-400">
-            {marketAlerts.length} total
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Balance</div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {formatCurrencyAmount(accountState.balance, currency)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Equity</div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {formatCurrencyAmount(accountState.equity, currency)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Margin</div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {formatCurrencyAmount(accountState.margin, currency)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Free Margin</div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {formatCurrencyAmount(accountState.freeMargin, currency)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Margin Level</div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {accountState.margin > 0 ? formatPercentAmount(accountState.marginLevel) : '—'}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Leverage</div>
+              <div className="mt-2 text-sm font-medium text-white">1:{accountState.accountLeverage}</div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Unrealized</div>
+              <div className="mt-2 text-sm font-medium text-white">
+                <span className={accountState.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                  {formatSignedCurrencyAmount(accountState.unrealizedPnl, currency)}
+                </span>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Order Reserve</div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {formatCurrencyAmount(accountState.reservedBalance, currency)}
+              </div>
+            </div>
+            <div className="col-span-2 rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Position</div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {(positionState?.availableQuantity ?? 0).toFixed(4)} {baseAsset}
+              </div>
+              {positionState && positionState.quantity > 0 ? (
+                <div className="mt-1 text-xs text-slate-500">
+                  Avg {formatPrice(positionState.averageEntryPrice, precision)} | Mark {formatPrice(positionState.markPrice, precision)}
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
 
-        <div className="mt-3 grid gap-3">
-          <label className="block">
-            <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
-              Trigger price ({currency})
-            </span>
-            <input
-              type="number"
-              min="0"
-              step="any"
-              value={alertPriceInput}
-              onChange={event => setAlertPriceInput(event.target.value)}
-              className="w-full rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
-              placeholder={snapshot ? formatPrice(snapshot.price, precision) : '0.00'}
-            />
-          </label>
+          <div className="mt-5 flex gap-2 rounded-2xl border border-white/8 bg-white/3 p-1">
+            <button
+              type="button"
+              className={`flex-1 rounded-xl px-3 py-2 text-sm transition ${
+                orderType === ORDER_TYPE_MARKET
+                  ? 'bg-cyan-400/15 text-cyan-100'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              onClick={() => setOrderType(ORDER_TYPE_MARKET)}
+            >
+              Market
+            </button>
+            <button
+              type="button"
+              className={`flex-1 rounded-xl px-3 py-2 text-sm transition ${
+                orderType === ORDER_TYPE_LIMIT
+                  ? 'bg-cyan-400/15 text-cyan-100'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              onClick={() => setOrderType(ORDER_TYPE_LIMIT)}
+            >
+              Limit
+            </button>
+          </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="mt-3 flex gap-2 rounded-2xl border border-white/8 bg-white/3 p-1">
+            <button
+              type="button"
+              className={`flex-1 rounded-xl px-3 py-2 text-sm transition ${
+                side === ORDER_SIDE_BUY
+                  ? 'bg-emerald-400/15 text-emerald-100'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              onClick={() => setSide(ORDER_SIDE_BUY)}
+            >
+              Buy
+            </button>
+            <button
+              type="button"
+              className={`flex-1 rounded-xl px-3 py-2 text-sm transition ${
+                side === ORDER_SIDE_SELL
+                  ? 'bg-rose-400/15 text-rose-100'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              onClick={() => setSide(ORDER_SIDE_SELL)}
+            >
+              Sell
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-3">
             <label className="block">
               <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                Reference
+                Quantity ({baseAsset})
               </span>
-              <select
-                value={alertReferenceKind}
-                onChange={event => setAlertReferenceKind(event.target.value as typeof PRICE_ALERT_REFERENCE_BID | typeof PRICE_ALERT_REFERENCE_ASK)}
-                className="w-full rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
-              >
-                <option value={PRICE_ALERT_REFERENCE_BID}>Bid price</option>
-                <option value={PRICE_ALERT_REFERENCE_ASK}>Ask price</option>
-              </select>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={quantityInput}
+                onChange={event => setQuantityInput(event.target.value)}
+                className="w-full rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
+                placeholder={`0.00 ${baseAsset}`}
+              />
             </label>
 
-            <label className="block">
-              <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                Expiry
-              </span>
-              <select
-                value={alertExpiryDays}
-                onChange={event => setAlertExpiryDays(Number.parseInt(event.target.value, 10) as 1 | 5 | 15 | 30)}
-                className="w-full rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
-              >
-                <option value={1}>1 day</option>
-                <option value={5}>5 days</option>
-                <option value={15}>15 days</option>
-                <option value={30}>30 days</option>
-              </select>
-            </label>
+            {orderType === ORDER_TYPE_LIMIT ? (
+              <label className="block">
+                <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                  Limit price ({currency})
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={limitPriceInput}
+                  onChange={event => setLimitPriceInput(event.target.value)}
+                  className="w-full rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
+                  placeholder={snapshot ? formatPrice(snapshot.price, precision) : '0.00'}
+                />
+              </label>
+            ) : null}
           </div>
 
           <button
             type="button"
-            disabled={isCreatingAlert}
+            disabled={isSubmitting}
             onClick={() => {
-              void handleCreatePriceAlert();
+              void handleSubmitOrder();
             }}
-            className="w-full rounded-2xl bg-amber-300/14 px-4 py-3 text-sm font-medium text-amber-100 transition hover:bg-amber-300/18 disabled:cursor-not-allowed disabled:opacity-60"
+            className={`mt-4 w-full rounded-2xl px-4 py-3 text-sm font-medium transition ${
+              side === ORDER_SIDE_BUY
+                ? 'bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/20'
+                : 'bg-rose-400/15 text-rose-100 hover:bg-rose-400/20'
+            } disabled:cursor-not-allowed disabled:opacity-60`}
           >
-            {isCreatingAlert ? 'Creating alert...' : 'Create price alert'}
+            {isSubmitting ? 'Submitting...' : `${side === ORDER_SIDE_BUY ? 'Buy' : 'Sell'} ${orderType}`}
           </button>
-        </div>
 
-        <div className="mt-4 space-y-2">
-          {marketAlerts.length === 0 ? (
-            <div className="rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-slate-500">
-              No alerts for this market yet.
-            </div>
-          ) : (
-            marketAlerts.slice(0, 6).map(alert => {
-              const isActive = alert.status === PRICE_ALERT_STATUS_ACTIVE;
-              const isTriggered = alert.status === PRICE_ALERT_STATUS_TRIGGERED;
-
-              return (
-                <div key={alert.id.toString()} className="rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-white">
-                        {formatAlertReference(alert.referencePriceKind)} {formatPrice(alert.triggerPrice, precision)}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        Triggers on {alert.triggerDirection} move · Expires {formatAlertTimestamp(alert.expiresAt)}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {isTriggered && alert.triggeredPrice != null
-                          ? `Triggered at ${formatPrice(alert.triggeredPrice, precision)} on ${formatAlertTimestamp(alert.triggeredAt)}`
-                          : `Watching ${formatAlertReference(alert.referencePriceKind).toLowerCase()} price`}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`text-[11px] uppercase tracking-[0.18em] ${isTriggered ? 'text-amber-200' : isActive ? 'text-cyan-200' : 'text-slate-500'}`}>
-                        {formatAlertStatus(alert.status)}
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isDeletingAlertId === alert.id.toString()}
-                        onClick={() => {
-                          void handleDeletePriceAlert(alert.id);
-                        }}
-                        className="mt-2 rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-rose-400/30 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isDeletingAlertId === alert.id.toString() ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
-                  </div>
+          <div className="mt-5 rounded-2xl border border-white/8 bg-white/3 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Price alerts</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Bid {formatPrice(bestBid, precision)} · Ask {formatPrice(bestAsk, precision)}
                 </div>
-              );
-            })
-          )}
-        </div>
-      </div>
+              </div>
+              <div className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-400">
+                {marketAlerts.length} total
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              <label className="block">
+                <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                  Trigger price ({currency})
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={alertPriceInput}
+                  onChange={event => setAlertPriceInput(event.target.value)}
+                  className="w-full rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
+                  placeholder={snapshot ? formatPrice(snapshot.price, precision) : '0.00'}
+                />
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                    Reference
+                  </span>
+                  <select
+                    value={alertReferenceKind}
+                    onChange={event => setAlertReferenceKind(event.target.value as typeof PRICE_ALERT_REFERENCE_BID | typeof PRICE_ALERT_REFERENCE_ASK)}
+                    className="w-full rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
+                  >
+                    <option value={PRICE_ALERT_REFERENCE_BID}>Bid price</option>
+                    <option value={PRICE_ALERT_REFERENCE_ASK}>Ask price</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                    Expiry
+                  </span>
+                  <select
+                    value={alertExpiryDays}
+                    onChange={event => setAlertExpiryDays(Number.parseInt(event.target.value, 10) as 1 | 5 | 15 | 30)}
+                    className="w-full rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-white outline-none transition focus:border-cyan-300/50"
+                  >
+                    <option value={1}>1 day</option>
+                    <option value={5}>5 days</option>
+                    <option value={15}>15 days</option>
+                    <option value={30}>30 days</option>
+                  </select>
+                </label>
+              </div>
+
+              <button
+                type="button"
+                disabled={isCreatingAlert}
+                onClick={() => {
+                  void handleCreatePriceAlert();
+                }}
+                className="w-full rounded-2xl bg-amber-300/14 px-4 py-3 text-sm font-medium text-amber-100 transition hover:bg-amber-300/18 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isCreatingAlert ? 'Creating alert...' : 'Create price alert'}
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {marketAlerts.length === 0 ? (
+                <div className="rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3 text-sm text-slate-500">
+                  No alerts for this market yet.
+                </div>
+              ) : (
+                marketAlerts.slice(0, 6).map(alert => {
+                  const isActive = alert.status === PRICE_ALERT_STATUS_ACTIVE;
+                  const isTriggered = alert.status === PRICE_ALERT_STATUS_TRIGGERED;
+
+                  return (
+                    <div key={alert.id.toString()} className="rounded-2xl border border-white/8 bg-[#08111d] px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-white">
+                            {formatAlertReference(alert.referencePriceKind)} {formatPrice(alert.triggerPrice, precision)}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Triggers on {alert.triggerDirection} move · Expires {formatAlertTimestamp(alert.expiresAt)}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {isTriggered && alert.triggeredPrice != null
+                              ? `Triggered at ${formatPrice(alert.triggeredPrice, precision)} on ${formatAlertTimestamp(alert.triggeredAt)}`
+                              : `Watching ${formatAlertReference(alert.referencePriceKind).toLowerCase()} price`}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className={`text-[11px] uppercase tracking-[0.18em] ${isTriggered ? 'text-amber-200' : isActive ? 'text-cyan-200' : 'text-slate-500'}`}>
+                            {formatAlertStatus(alert.status)}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isDeletingAlertId === alert.id.toString()}
+                            onClick={() => {
+                              void handleDeletePriceAlert(alert.id);
+                            }}
+                            className="mt-2 rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-rose-400/30 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isDeletingAlertId === alert.id.toString() ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {errorMessage ? (
         <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">
@@ -843,20 +868,21 @@ export function LiveTradingPanel({
         </div>
       ) : null}
 
-      <div className="mt-5 rounded-2xl border border-white/8 bg-white/3 p-3">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Positions</div>
-          <div className="text-[11px] text-slate-500">
-            {positionState && positionState.availableQuantity > 0 ? '1 open' : 'No open position'}
+      {showPositionsPanel ? (
+        <div className={`${showTradingTicket ? 'mt-5' : ''} rounded-2xl border border-white/8 bg-white/3 p-3`}>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Positions</div>
+            <div className="text-[11px] text-slate-500">
+              {positionState && positionState.availableQuantity > 0 ? '1 open' : 'No open position'}
+            </div>
           </div>
-        </div>
 
-        <Tabs value={positionTab} onValueChange={setPositionTab} className="gap-3">
-          <TabsList className="w-full bg-[#08111d]">
-            <TabsTrigger value="open">Open</TabsTrigger>
-            <TabsTrigger value="pending">Pending</TabsTrigger>
-            <TabsTrigger value="closed">Closed</TabsTrigger>
-          </TabsList>
+          <Tabs value={positionTab} onValueChange={setPositionTab} className="gap-3">
+            <TabsList className="w-full bg-[#08111d]">
+              <TabsTrigger value="open">Open</TabsTrigger>
+              <TabsTrigger value="pending">Pending</TabsTrigger>
+              <TabsTrigger value="closed">Closed</TabsTrigger>
+            </TabsList>
 
           <TabsContent value="open" className="space-y-2">
               {positionState && positionState.availableQuantity > 0 ? (
@@ -1023,10 +1049,11 @@ export function LiveTradingPanel({
               })
             )}
           </TabsContent>
-        </Tabs>
-      </div>
+          </Tabs>
+        </div>
+      ) : null}
 
-      {isModifyDialogOpen && positionState ? (
+      {showPositionsPanel && isModifyDialogOpen && positionState ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4">
           <div className="w-full max-w-md rounded-[24px] border border-white/10 bg-[#08111d] p-4 shadow-[0_30px_100px_rgba(0,0,0,0.42)]">
             <div className="flex items-start justify-between gap-3">

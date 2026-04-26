@@ -66,12 +66,9 @@ export function OrderBookPanel({ bids, asks, precision, spread }: OrderBookPanel
   );
 
   return (
-    <aside className="rounded-[24px] border border-white/8 bg-[#08111d] p-4 text-slate-300">
+    <aside className="px-3 text-slate-300">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Order Book</p>
-          <h3 className="mt-1 text-sm font-medium text-white">Simulated market depth</h3>
-        </div>
+        <p className="text-xs uppercase tracking-[0.24em]">Market depth</p>
         <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-[11px] text-cyan-200">
           Spread {formatPrice(spread, precision)}
         </div>
@@ -89,7 +86,7 @@ export function OrderBookPanel({ bids, asks, precision, spread }: OrderBookPanel
           <OrderBookSide entries={asks} maxTotal={maxTotal} precision={precision} tone="ask" />
         </div>
 
-        <div className="rounded-xl border border-white/6 bg-white/[0.03] px-3 py-2 text-center text-xs text-slate-400">
+        <div className="rounded-xl border border-white/6 bg-white/3 px-3 py-2 text-center text-xs text-slate-400">
           Best bid/ask spread: <span className="font-medium text-white">{formatPrice(spread, precision)}</span>
         </div>
 

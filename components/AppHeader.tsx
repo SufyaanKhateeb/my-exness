@@ -232,7 +232,7 @@ function AccountSummaryMenu() {
           type="button"
           className={cn(
             buttonVariants({ variant: "outline", size: "sm" }),
-            "h-12 min-w-42.5 justify-between rounded-2xl px-4"
+            "h-12 justify-between"
           )}
         >
           <span className="flex items-center gap-2">
@@ -389,7 +389,7 @@ function PriceAlertsMenu() {
           type="button"
           className={cn(
             buttonVariants({ variant: "outline", size: "sm" }),
-            "h-12 rounded-2xl px-4"
+            "h-12"
           )}
         >
           <Bell className="size-4 text-primary" />
@@ -556,7 +556,7 @@ function UserMenu() {
           type="button"
           className={cn(
             buttonVariants({ variant: "outline", size: "sm" }),
-            "h-12 rounded-2xl px-3"
+            "h-12"
           )}
         >
           <Avatar className="size-8 border border-border/70">
@@ -621,7 +621,7 @@ function UserMenu() {
 
 export default function AppHeader() {
   return (
-    <Card className="rounded-none border-border/70 px-4 py-2 shadow-sm md:px-5 md:py-2">
+    <Card className="bg-transparent rounded-none border-border/70 px-4 py-2 shadow-sm md:px-5 md:py-2">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-12 items-center rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 text-sm font-semibold uppercase tracking-[0.24em] text-foreground">

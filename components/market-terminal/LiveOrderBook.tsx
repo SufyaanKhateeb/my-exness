@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useTable } from 'spacetimedb/react';
 
 import { OrderBookPanel } from '@/components/market-terminal/OrderBookPanel';
+import { Card, CardContent } from '@/components/ui/card';
 import { tables } from '@/src/module_bindings';
 
 type LiveOrderBookProps = {
@@ -46,9 +47,11 @@ export function LiveOrderBook({ marketId, precision }: LiveOrderBookProps) {
 
   if (!levelsReady) {
     return (
-      <aside className="rounded-[24px] border border-white/8 bg-[#08111d] p-4 text-sm text-slate-400">
-        Loading simulated order book...
-      </aside>
+      <Card className="h-full text-slate-400 shadow-none">
+        <CardContent className="flex h-full items-center justify-center p-4 text-sm">
+          Loading simulated order book...
+        </CardContent>
+      </Card>
     );
   }
 
