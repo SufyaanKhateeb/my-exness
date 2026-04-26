@@ -16,21 +16,35 @@ import {
 import {
   CHART_HEIGHT,
   HISTORY_LOAD_THRESHOLD_BARS,
+  getIntervalTriggerLabel,
   formatPrice,
+  type IntervalUnit,
 } from '@/lib/market-terminal';
 
 type CandlestickChartProps = {
   candles: CandlestickData[];
   precision: number;
+  marketLabel: string;
+  intervalAmount: number;
+  intervalUnit: IntervalUnit;
   canLoadMoreHistory?: boolean;
   onRequestMoreHistory?: () => void;
 };
 
-function renderOverlayMarkup(candle: CandlestickData, precision: number, time: Time) {
+function renderOverlayMarkup(
+  candle: CandlestickData,
+  precision: number,
+  time: Time,
+  marketLabel: string,
+  intervalAmount: number,
+  intervalUnit: IntervalUnit,
+) {
   const outcomeColor = candle.close >= candle.open ? '#4ade80' : '#fb7185';
+  const intervalLabel = getIntervalTriggerLabel(intervalAmount, intervalUnit);
 
   return `
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;font-size:11px;line-height:1.2;">
+      <span style="color:#e2ecf9;font-size:12px;font-weight:600;letter-spacing:0.01em;">${marketLabel} . ${intervalLabel}</span>
       <span style="color:#8ea3bd;letter-spacing:0.08em;text-transform:uppercase;">${formatTooltipTime(time)}</span>
       <span style="color:#5f738e;letter-spacing:0.1em;text-transform:uppercase;">O <span style="color:${outcomeColor};font-size:12px;">${formatPrice(candle.open, precision)}</span></span>
       <span style="color:#5f738e;letter-spacing:0.1em;text-transform:uppercase;">H <span style="color:${outcomeColor};font-size:12px;">${formatPrice(candle.high, precision)}</span></span>
@@ -69,6 +83,9 @@ function formatTooltipTime(time: Time) {
 export function CandlestickChart({
   candles,
   precision,
+  marketLabel,
+  intervalAmount,
+  intervalUnit,
   canLoadMoreHistory = false,
   onRequestMoreHistory,
 }: CandlestickChartProps) {
@@ -105,8 +122,15 @@ export function CandlestickChart({
       return;
     }
 
-    overlay.innerHTML = renderOverlayMarkup(latestCandle, precision, latestCandle.time);
-  }, [candles, precision]);
+    overlay.innerHTML = renderOverlayMarkup(
+      latestCandle,
+      precision,
+      latestCandle.time,
+      marketLabel,
+      intervalAmount,
+      intervalUnit,
+    );
+  }, [candles, intervalAmount, intervalUnit, marketLabel, precision]);
 
   useEffect(() => {
     const container = chartContainerRef.current;
@@ -119,7 +143,7 @@ export function CandlestickChart({
       width: container.clientWidth,
       height: container.clientHeight || CHART_HEIGHT,
       layout: {
-        background: { type: ColorType.Solid, color: '#08111d' },
+        background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#8ea3bd',
       },
       grid: {
@@ -182,7 +206,14 @@ export function CandlestickChart({
         return;
       }
 
-      overlay.innerHTML = renderOverlayMarkup(data, precisionRef.current, param.time);
+      overlay.innerHTML = renderOverlayMarkup(
+        data,
+        precisionRef.current,
+        param.time,
+        marketLabel,
+        intervalAmount,
+        intervalUnit,
+      );
     });
 
     const handleVisibleLogicalRangeChange: LogicalRangeChangeEventHandler = logicalRange => {
@@ -200,7 +231,6 @@ export function CandlestickChart({
       const barsInfo = currentSeries.barsInLogicalRange(logicalRange);
 
       if (barsInfo && barsInfo.barsBefore < HISTORY_LOAD_THRESHOLD_BARS) {
-        console.log('logicalRange', logicalRange?.from);
         historyRequestPendingRef.current = true;
         onRequestMoreHistoryRef.current();
       }
@@ -228,7 +258,7 @@ export function CandlestickChart({
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, []);
+  }, [intervalAmount, intervalUnit, marketLabel]);
 
   useEffect(() => {
     if (!seriesRef.current) {
@@ -239,14 +269,12 @@ export function CandlestickChart({
   }, [candles]);
 
   return (
-    <div className="overflow-hidden rounded-[24px] border border-white/8 bg-[#08111d] p-2 md:p-3">
-      <div ref={chartContainerRef} className="relative h-107.5 w-full">
-        <div
-          ref={overlayRef}
-          className="pointer-events-none absolute left-3 top-3 z-20 px-1 py-0.5 md:left-4 md:top-4"
-          style={{ background: 'transparent' }}
-        />
-      </div>
+    <div ref={chartContainerRef} className="relative h-full w-full min-h-0">
+      <div
+        ref={overlayRef}
+        className="pointer-events-none absolute left-3 top-3 z-20 px-1 py-0.5 md:left-4 md:top-4"
+        style={{ background: 'transparent' }}
+      />
     </div>
   );
 }

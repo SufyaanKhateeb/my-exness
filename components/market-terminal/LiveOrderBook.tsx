@@ -5,6 +5,7 @@ import { useTable } from 'spacetimedb/react';
 
 import { OrderBookPanel } from '@/components/market-terminal/OrderBookPanel';
 import { Card, CardContent } from '@/components/ui/card';
+import { Spinner } from '@/components/ui/spinner';
 import { tables } from '@/src/module_bindings';
 
 type LiveOrderBookProps = {
@@ -49,7 +50,10 @@ export function LiveOrderBook({ marketId, precision }: LiveOrderBookProps) {
     return (
       <Card className="h-full text-slate-400 shadow-none">
         <CardContent className="flex h-full items-center justify-center p-4 text-sm">
-          Loading simulated order book...
+          <div className="flex items-center gap-3">
+            <Spinner className="size-4" />
+            <span>Loading simulated order book...</span>
+          </div>
         </CardContent>
       </Card>
     );

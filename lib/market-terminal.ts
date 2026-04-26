@@ -26,6 +26,31 @@ export const FALLBACK_CANDLES: CandlestickData[] = [
 
 export type IntervalUnit = 'minute' | 'hour' | 'day' | 'week' | 'month';
 
+export type IntervalOption = {
+  amount: number;
+  unit: IntervalUnit;
+  label: string;
+};
+
+export const CHART_INTERVAL_OPTIONS: IntervalOption[] = [
+  { amount: 1, unit: 'minute', label: '1m' },
+  { amount: 2, unit: 'minute', label: '2m' },
+  { amount: 3, unit: 'minute', label: '3m' },
+  { amount: 4, unit: 'minute', label: '4m' },
+  { amount: 5, unit: 'minute', label: '5m' },
+  { amount: 10, unit: 'minute', label: '10m' },
+  { amount: 15, unit: 'minute', label: '15m' },
+  { amount: 30, unit: 'minute', label: '30m' },
+  { amount: 45, unit: 'minute', label: '45m' },
+  { amount: 1, unit: 'hour', label: '1h' },
+  { amount: 2, unit: 'hour', label: '2h' },
+  { amount: 4, unit: 'hour', label: '4h' },
+  { amount: 1, unit: 'day', label: '1D' },
+  { amount: 1, unit: 'week', label: '1W' },
+  { amount: 1, unit: 'month', label: '1M' },
+  { amount: 12, unit: 'month', label: '12M' },
+];
+
 export type SourceCandle = {
   id: bigint;
   marketId: number;
@@ -145,12 +170,24 @@ export function getIntervalLabel(amount: number, unit: IntervalUnit) {
       : unit === 'hour'
         ? 'h'
         : unit === 'day'
-          ? 'd'
+          ? 'D'
           : unit === 'week'
-            ? 'w'
-            : 'mo';
+            ? 'W'
+            : 'M';
 
   return `${amount}${suffix}`;
+}
+
+export function isPresetInterval(amount: number, unit: IntervalUnit) {
+  return CHART_INTERVAL_OPTIONS.some(option => option.amount === amount && option.unit === unit);
+}
+
+export function getIntervalOption(amount: number, unit: IntervalUnit) {
+  return CHART_INTERVAL_OPTIONS.find(option => option.amount === amount && option.unit === unit) ?? null;
+}
+
+export function getIntervalTriggerLabel(amount: number, unit: IntervalUnit) {
+  return getIntervalOption(amount, unit)?.label ?? getIntervalLabel(amount, unit);
 }
 
 export function usesMinuteSource(unit: IntervalUnit) {

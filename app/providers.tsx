@@ -8,6 +8,7 @@ import { Identity } from 'spacetimedb';
 
 import { ConnectionStatusIndicator, type ConnectionHealthState } from '../components/ConnectionStatusIndicator';
 import { NotificationBridge } from '../components/NotificationBridge';
+import { Spinner } from '@/components/ui/spinner';
 import { Toaster } from '@/components/ui/sonner';
 
 const HOST =
@@ -230,7 +231,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return (
       <>
         <div className="flex min-h-screen items-center justify-center bg-[#040b14] text-sm text-slate-400">
-          Connecting to SpacetimeDB...
+          <div className="flex items-center gap-3">
+            <Spinner className="size-4" />
+            <span>Connecting to SpacetimeDB...</span>
+          </div>
         </div>
         <ConnectionStatusIndicator state={connectionState} host={HOST} databaseName={DB_NAME} />
       </>

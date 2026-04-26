@@ -5,12 +5,12 @@ import { useReducer, useTable } from 'spacetimedb/react';
 
 import { type IntervalUnit } from '@/lib/market-terminal';
 import { LiveMarketChart } from '@/components/market-terminal/LiveMarketChart';
+import { LiveOrderWidget } from '@/components/market-terminal/LiveOrderWidget';
 import { LiveOrderBook } from '@/components/market-terminal/LiveOrderBook';
 import { LiveMarketSidebar } from '@/components/market-terminal/LiveMarketSidebar';
 import { LivePositionsPanel } from '@/components/market-terminal/LivePositionsPanel';
-import { LiveTerminalHero } from '@/components/market-terminal/LiveTerminalHero';
-import { LiveTradingTicket } from '@/components/market-terminal/LiveTradingTicket';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { Spinner } from '@/components/ui/spinner';
 import { reducers, tables } from '@/src/module_bindings';
 
 export default function MarketTerminal() {
@@ -31,7 +31,10 @@ export default function MarketTerminal() {
   if (!marketsReady || !selectedMarket) {
     return (
       <div className="flex min-h-155 items-center justify-center rounded-[28px] border border-white/8 bg-[#08111d] text-sm text-slate-400">
-        Loading simulated exchange...
+        <div className="flex items-center gap-3">
+          <Spinner className="size-4" />
+          <span>Loading simulated exchange...</span>
+        </div>
       </div>
     );
   }
@@ -53,21 +56,16 @@ export default function MarketTerminal() {
 
       <ResizableHandle withHandle />
 
-      <ResizablePanel defaultSize={44} minSize={28}>
-        <ResizablePanelGroup orientation="vertical" className="h-full gap-3">
-          <ResizablePanel defaultSize={62} minSize={36}>
-            <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_32%),linear-gradient(180deg,#0b1628_0%,#07111d_100%)] shadow-[0_30px_100px_rgba(0,0,0,0.42)]">
-              <LiveTerminalHero
-                market={selectedMarket}
-                intervalAmount={intervalAmount}
-                intervalUnit={intervalUnit}
-              />
-
-              <div className="min-h-0 flex-1 px-3 pb-3 pt-2 md:px-4 md:pb-4">
-                <div className="h-full overflow-auto">
+      <ResizablePanel defaultSize={1} minSize={400}>
+        <ResizablePanelGroup orientation="vertical" className="h-full">
+          <ResizablePanel defaultSize={1} minSize={300}>
+            <section className="flex h-full min-h-0 flex-col overflow-hidden">
+              <div className="min-h-0 flex-1">
+                <div className="h-full min-h-0">
                   <LiveMarketChart
-                    key={`${selectedMarket.id}:${intervalAmount}:${intervalUnit}`}
+                    key={`chart:${selectedMarket.id}:${intervalAmount}:${intervalUnit}`}
                     marketId={selectedMarket.id}
+                    marketLabel={`${selectedMarket.baseAsset} vs ${selectedMarket.quoteAsset}`}
                     precision={selectedMarket.precision}
                     intervalAmount={intervalAmount}
                     intervalUnit={intervalUnit}
@@ -103,7 +101,7 @@ export default function MarketTerminal() {
         <ResizablePanelGroup orientation="vertical" className="h-full gap-3">
           <ResizablePanel defaultSize={58} minSize={28}>
             <div className="h-full overflow-auto">
-              <LiveTradingTicket
+              <LiveOrderWidget
                 key={`ticket-panel:${selectedMarket.id}`}
                 marketId={selectedMarket.id}
                 marketSymbol={selectedMarket.symbol}

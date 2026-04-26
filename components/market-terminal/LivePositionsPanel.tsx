@@ -5,10 +5,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useReducer, useSpacetimeDB, useTable } from 'spacetimedb/react';
 
 import LoginButton from '@/components/LoginButton';
-import { type LiveTradingPanelProps } from '@/components/market-terminal/LiveTradingPanel';
+import { type TradingPanelProps } from '@/components/market-terminal/trading-panel.types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatPrice } from '@/lib/market-terminal';
@@ -120,7 +121,7 @@ export function LivePositionsPanel({
   baseAsset,
   quoteAsset,
   precision,
-}: LiveTradingPanelProps) {
+}: TradingPanelProps) {
   const { user, isLoading } = useUser();
   const { getConnection, isActive } = useSpacetimeDB();
   const closeMarketPosition = useReducer(reducers.closeMarketPosition);
@@ -290,7 +291,12 @@ export function LivePositionsPanel({
   if (isLoading) {
     return (
       <Card className="rounded-[24px] border-white/8 bg-[#08111d] text-slate-300 shadow-none">
-        <CardContent className="p-4 text-sm text-slate-400">Loading account state...</CardContent>
+        <CardContent className="p-4 text-sm text-slate-400">
+          <div className="flex items-center gap-3">
+            <Spinner className="size-4" />
+            <span>Loading account state...</span>
+          </div>
+        </CardContent>
       </Card>
     );
   }
@@ -314,7 +320,12 @@ export function LivePositionsPanel({
   if (!isTradingStateReady) {
     return (
       <Card className="rounded-[24px] border-white/8 bg-[#08111d] text-slate-300 shadow-none">
-        <CardContent className="p-4 text-sm text-slate-400">Preparing your trading account...</CardContent>
+        <CardContent className="p-4 text-sm text-slate-400">
+          <div className="flex items-center gap-3">
+            <Spinner className="size-4" />
+            <span>Preparing your trading account...</span>
+          </div>
+        </CardContent>
       </Card>
     );
   }

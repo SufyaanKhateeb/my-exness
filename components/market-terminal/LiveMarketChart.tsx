@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Timestamp } from "spacetimedb";
-import { useSpacetimeDB, useTable } from "spacetimedb/react";
+import { useTable } from "spacetimedb/react";
 import { CandlestickData } from "lightweight-charts";
 
 import { CandlestickChart } from "@/components/market-terminal/CandlestickChart";
@@ -22,6 +22,7 @@ import { tables } from "@/src/module_bindings";
 
 type LiveMarketChartProps = {
     marketId: number;
+    marketLabel: string;
     precision: number;
     intervalAmount: number;
     intervalUnit: IntervalUnit;
@@ -31,17 +32,20 @@ type LiveMarketChartProps = {
 
 export function LiveMarketChart({
     marketId,
+    marketLabel,
     precision,
     intervalAmount,
     intervalUnit,
     onIntervalAmountChange,
     onIntervalUnitChange,
 }: LiveMarketChartProps) {
-    const conn = useSpacetimeDB();
     const safeIntervalAmount = Math.max(1, Math.trunc(intervalAmount) || 1);
     const activeSourceUsesMinutes = usesMinuteSource(intervalUnit);
-    const [selectedMinuteCandles, setSelectedMinuteCandles] = useState<SourceCandle[]>([]); // Force re-render when interval changes
-    const [selectedDayCandles, setSelectedDayCandles] = useState<SourceCandle[]>([]); // Force re-render when interval changes
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [overlayContainer, setOverlayContainer] = useState<HTMLDivElement | null>(null);
+    const fullscreenContainerRef = useRef<HTMLDivElement | null>(null);
+    const [selectedMinuteCandles, setSelectedMinuteCandles] = useState<SourceCandle[]>([]); // need this for preventing unwanted re-renders
+    const [selectedDayCandles, setSelectedDayCandles] = useState<SourceCandle[]>([]); // need this for preventing unwanted re-renders
 
     const [historyWindowStartMs, setHistoryWindowStartMs] = useState(() => {
         const initialWindowMs = getInitialHistoryWindowMs(safeIntervalAmount, intervalUnit);
@@ -60,33 +64,6 @@ export function LiveMarketChart({
             : tables.marketDayCandle.where((candle) => candle.marketId.eq(marketId).and(candle.bucketStart.gte(historyWindowStart))),
     );
 
-    // const selectedMinuteCandles = useMemo(() => {
-    //         // eslint-disable-next-line react-hooks/refs
-    //     if(minuteCandles.length === 0) return previousSelectedMinuteCandlesRef.current;
-    //     return [...minuteCandles].sort(sortByBucketStart);
-    //     return getStableSortedSourceCandles(
-    //         // eslint-disable-next-line react-hooks/refs
-    //         previousSelectedMinuteCandlesRef.current,
-    //         minuteCandles,
-    //     );
-    // }, [minuteCandles]);
-
-    // const selectedDayCandles = useMemo(() => {
-    //         // eslint-disable-next-line react-hooks/refs
-    //     if(dayCandles.length === 0) return previousSelectedDayCandlesRef.current;
-    //     return [...dayCandles].sort(sortByBucketStart);
-    //     return getStableSortedSourceCandles(
-    //         // eslint-disable-next-line react-hooks/refs
-    //         previousSelectedDayCandlesRef.current,
-    //         dayCandles,
-    //     );
-    // }, [dayCandles]);
-
-    // useEffect(() => {
-    //     previousSelectedMinuteCandlesRef.current = selectedMinuteCandles;
-    //     previousSelectedDayCandlesRef.current = selectedDayCandles;
-    // }, [selectedMinuteCandles, selectedDayCandles]);
-
     useEffect(() => {
         if (minuteCandles.length > 0) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -100,6 +77,18 @@ export function LiveMarketChart({
             setSelectedDayCandles(() => [...dayCandles].sort(sortByBucketStart));
         }
     }, [dayCandles]);
+
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(document.fullscreenElement === fullscreenContainerRef.current);
+        };
+
+        document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+        return () => {
+            document.removeEventListener("fullscreenchange", handleFullscreenChange);
+        };
+    }, []);
 
     const selectedCandles = useMemo(() => {
         const sourceRows = activeSourceUsesMinutes ? selectedMinuteCandles : selectedDayCandles;
@@ -124,29 +113,60 @@ export function LiveMarketChart({
             return;
         }
 
-        console.log("inherently requesting more history");
         setHistoryWindowStartMs((currentWindowStartMs) =>
             Math.max(historyRetentionFloorMs, currentWindowStartMs - getHistoryChunkWindowMs(safeIntervalAmount, intervalUnit)),
         );
     }
 
+    async function handleToggleFullscreen() {
+        const chartSurface = fullscreenContainerRef.current;
+
+        if (!chartSurface) {
+            return;
+        }
+
+        if (document.fullscreenElement === chartSurface) {
+            await document.exitFullscreen();
+            return;
+        }
+
+        await chartSurface.requestFullscreen();
+    }
+
+    const handleContainerRef = (node: HTMLDivElement | null) => {
+        fullscreenContainerRef.current = node;
+        setOverlayContainer(node);
+    };
+
     return (
-        <>
+        <div
+            ref={handleContainerRef}
+            className={`flex min-h-0 flex-col overflow-hidden border-none shadow-none ${
+                isFullscreen ? "h-screen w-screen rounded-none border-none" : "h-full"
+            }`}
+        >
             <ChartToolbar
-                isConnected={conn.isActive}
-                hasLiveCandles={selectedCandles.length > 0}
                 intervalAmount={safeIntervalAmount}
                 intervalUnit={intervalUnit}
+                isFullscreen={isFullscreen}
+                overlayContainer={overlayContainer}
                 onIntervalAmountChange={onIntervalAmountChange}
                 onIntervalUnitChange={onIntervalUnitChange}
+                onToggleFullscreen={() => {
+                    void handleToggleFullscreen();
+                }}
             />
-            <CandlestickChart
-                candles={chartCandles}
-                precision={precision}
-                canLoadMoreHistory={canLoadMoreHistory}
-                onRequestMoreHistory={handleRequestMoreHistory}
-            />
-        </>
+            <div className="min-h-0 flex-1 px-1 pb-1 md:px-2 md:pb-2">
+                <CandlestickChart
+                    candles={chartCandles}
+                    precision={precision}
+                    marketLabel={marketLabel}
+                    intervalAmount={safeIntervalAmount}
+                    intervalUnit={intervalUnit}
+                    canLoadMoreHistory={canLoadMoreHistory}
+                    onRequestMoreHistory={handleRequestMoreHistory}
+                />
+            </div>
+        </div>
     );
-    return <div></div>;
 }
