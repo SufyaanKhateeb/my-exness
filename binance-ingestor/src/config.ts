@@ -18,6 +18,7 @@ export type IngestConfig = {
   binanceRestBaseUrl: string;
   orderBookLevels: 5 | 10 | 20;
   reconnectDelayMs: number;
+  binanceStaleMessageTimeoutMs: number;
   reducerFlushIntervalMs: number;
   reducerFlushJitterMs: number;
   binanceSessionMaxLifetimeMs: number;
@@ -182,6 +183,12 @@ export function loadConfig(): IngestConfig {
       'https://api.binance.com',
     orderBookLevels: parseOrderBookLevels(getEnv('BINANCE_ORDER_BOOK_LEVELS')),
     reconnectDelayMs: parseReconnectDelayMs(getEnv('BINANCE_RECONNECT_DELAY_MS')),
+    binanceStaleMessageTimeoutMs: parsePositiveInteger(
+      getEnv('BINANCE_STALE_MESSAGE_TIMEOUT_MS'),
+      90_000,
+      'BINANCE_STALE_MESSAGE_TIMEOUT_MS',
+      30_000
+    ),
     reducerFlushIntervalMs: parsePositiveInteger(
       getEnv('BINANCE_REDUCER_FLUSH_INTERVAL_MS'),
       750,

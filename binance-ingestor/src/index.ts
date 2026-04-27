@@ -222,10 +222,12 @@ class ReducerBatcher {
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
   private flushInFlight = Promise.resolve();
   private stopped = false;
+  private flushError: unknown;
 
   constructor(
     private readonly connection: DbConnection,
     private readonly config: IngestConfig,
+    private readonly onFlushError?: (error: unknown) => void,
   ) {}
 
   stageTicker(nextTicker: PendingTickerState) {
@@ -247,6 +249,10 @@ class ReducerBatcher {
   }
 
   async flushNow() {
+    if (this.flushError) {
+      throw this.flushError;
+    }
+
     if (this.pendingByMarket.size === 0) {
       return;
     }
@@ -291,6 +297,11 @@ class ReducerBatcher {
     }
 
     await this.flushInFlight;
+
+    if (this.flushError) {
+      throw this.flushError;
+    }
+
     await this.flushNow();
   }
 
@@ -320,7 +331,8 @@ class ReducerBatcher {
         .then(() => this.flushNow())
         .catch(error => {
           console.error('[binance-ingestor] Failed to flush reducer batch', error);
-          throw error;
+          this.flushError = error;
+          this.onFlushError?.(error);
         });
     }, this.config.reducerFlushIntervalMs + jitter);
   }
@@ -391,29 +403,57 @@ async function runBinanceLoop(
 ) {
   const marketLookup = createMarketLookup(config.markets);
   const streamUrl = buildStreamUrl(config);
-  const batcher = new ReducerBatcher(connection, config);
+  let cycleError: unknown;
+  let socket: WebSocket | null = null;
+  const batcher = new ReducerBatcher(connection, config, error => {
+    cycleError = error;
+
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+      socket.close(4003, 'reducer-flush-failure');
+    }
+  });
 
   try {
     await new Promise<void>(resolve => {
-      const socket = new WebSocket(streamUrl);
+      socket = new WebSocket(streamUrl);
       const forcedRotationTimer = setTimeout(() => {
         console.warn('[binance-ingestor] Rotating Binance session before the 24 hour limit');
-        socket.close(4000, 'session-rotation');
+        socket?.close(4000, 'session-rotation');
       }, config.binanceSessionMaxLifetimeMs);
+      const staleWatchdogTimer = setInterval(() => {
+        if (!socket || socket.readyState !== WebSocket.OPEN || state.lastBinanceOpenAt == null) {
+          return;
+        }
+
+        const lastActivityAt = state.lastBinanceMessageAt ?? state.lastBinanceOpenAt;
+        const idleForMs = Date.now() - lastActivityAt;
+
+        if (idleForMs < config.binanceStaleMessageTimeoutMs) {
+          return;
+        }
+
+        console.warn('[binance-ingestor] Binance websocket appears stale, restarting ingest cycle', {
+          idleForMs,
+          timeoutMs: config.binanceStaleMessageTimeoutMs,
+        });
+        socket.close(4002, 'stale-binance-session');
+      }, Math.min(config.binanceStaleMessageTimeoutMs, 30_000));
 
       const cleanup = () => {
         clearTimeout(forcedRotationTimer);
+        clearInterval(staleWatchdogTimer);
       };
 
       disconnected.then(() => {
         console.warn('[binance-ingestor] SpacetimeDB disconnected, restarting ingest cycle');
-        socket.close(4001, 'spacetimedb-disconnect');
+        socket?.close(4001, 'spacetimedb-disconnect');
       }).catch(() => {
-        socket.close(4001, 'spacetimedb-disconnect');
+        socket?.close(4001, 'spacetimedb-disconnect');
       });
 
       socket.addEventListener('open', () => {
         state.lastBinanceOpenAt = Date.now();
+        state.lastBinanceMessageAt = null;
         console.log('[binance-ingestor] Connected to Binance combined stream', streamUrl);
       });
 
@@ -465,7 +505,19 @@ async function runBinanceLoop(
       });
     });
   } finally {
-    await batcher.stop();
+    try {
+      await batcher.stop();
+    } catch (error) {
+      cycleError ??= error;
+    }
+
+    socket = null;
+    state.lastBinanceOpenAt = null;
+    state.lastBinanceMessageAt = null;
+  }
+
+  if (cycleError) {
+    throw cycleError;
   }
 }
 
