@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { CircleX } from 'lucide-react';
 import { formatPrice } from '@/lib/market-terminal';
 import { DbConnection, reducers, tables } from '@/src/module_bindings';
+import type { MarketPositionState, OpenPositionLotState, MarketSnapshot } from '@/src/module_bindings/types';
 
 const ORDER_SIDE_BUY = 'buy';
 const ORDER_EXECUTION_TYPE_OPEN = 'open';
@@ -23,53 +24,6 @@ const ORDER_STATUS_OPEN = 'open';
 
 type TradingAccountState = {
   currency: string;
-};
-
-type MarketPositionState = {
-  marketId: number;
-  side: string;
-  quantity: number;
-  reservedQuantity: number;
-  availableQuantity: number;
-  averageEntryPrice: number;
-  markPrice: number;
-  unrealizedPnl: number;
-};
-
-type MarketOrderState = {
-  id: bigint;
-  marketId: number;
-  side: string;
-  executionType: string;
-  orderType: string;
-  status: string;
-  quantity: number;
-  limitPrice: number | undefined;
-};
-
-type PositionHistoryState = {
-  id: bigint;
-  marketId: number;
-  quantity: number;
-  entryPrice: number;
-  exitPrice: number;
-  realizedPnl: number;
-  closedAt: { toMillis(): bigint };
-};
-
-type OpenPositionLotState = {
-  id: bigint;
-  marketId: number;
-  side: string;
-  quantity: number;
-  openPrice: number;
-  currentPrice: number;
-  unrealizedPnl: number;
-  openedAt: { toMillis(): bigint };
-};
-
-type MarketSnapshotState = {
-  price: number;
 };
 
 function getDefaultTradeQuantity(baseAsset: string) {
@@ -140,34 +94,56 @@ export function LivePositionsPanel({
   const [isCancellingOrderId, setIsCancellingOrderId] = useState<string | null>(null);
   const [hasTradingAccess, setHasTradingAccess] = useState(false);
   const [hasTradingAccessResolved, setHasTradingAccessResolved] = useState(false);
-  const [snapshots] = useTable(
-    tables.marketSnapshot.where(snapshot => snapshot.marketId.eq(marketId))
-  );
+  const [markets] = useTable(tables.market);
+  const [snapshots] = useTable(tables.marketSnapshot);
   const [accountRows, accountReady] = useTable(tables.myTradingAccountState);
-  const [positionRows, positionReady] = useTable(
-    tables.myMarketPositionState.where(position => position.marketId.eq(marketId))
-  );
-  const [ordersRows, ordersReady] = useTable(
-    tables.myMarketOrders.where(order => order.marketId.eq(marketId))
-  );
-  const [openPositionLotRows, openPositionLotsReady] = useTable(
-    tables.myOpenPositionLots.where(positionLot => positionLot.marketId.eq(marketId))
-  );
-  const [positionHistoryRows, positionHistoryReady] = useTable(
-    tables.myPositionHistory.where(positionHistory => positionHistory.marketId.eq(marketId))
-  );
-
-  const snapshot = (snapshots[0] as MarketSnapshotState | undefined) ?? null;
+  const [positionRows, positionReady] = useTable(tables.myMarketPositionState);
+  const [ordersRows, ordersReady] = useTable(tables.myMarketOrders);
+  const [openPositionLotRows, openPositionLotsReady] = useTable(tables.myOpenPositionLots);
+  const [positionHistoryRows, positionHistoryReady] = useTable(tables.myPositionHistory);
   const accountState = (accountRows[0] as TradingAccountState | undefined) ?? null;
-  const positionStates = positionRows as readonly MarketPositionState[];
-  const ordersState = ordersRows as readonly MarketOrderState[];
-  const openPositionLots = openPositionLotRows as readonly OpenPositionLotState[];
-  const positionHistoryState = positionHistoryRows as readonly PositionHistoryState[];
   const currency = accountState?.currency ?? quoteAsset;
   const defaultTradeQuantity = useMemo(() => getDefaultTradeQuantity(baseAsset), [baseAsset]);
+  const marketById = useMemo(() => new Map(markets.map(market => [market.id, market])), [markets]);
+  const snapshotByMarketId = useMemo(
+    () => new Map((snapshots as readonly MarketSnapshot[]).map(snapshot => [snapshot.marketId, snapshot])),
+    [snapshots]
+  );
+  const getMarketMeta = useMemo(
+    () =>
+      (targetMarketId: number) => {
+        const market = marketById.get(targetMarketId);
+
+        if (market) {
+          return {
+            symbol: market.symbol,
+            baseAsset: market.baseAsset,
+            precision: market.precision,
+            price: snapshotByMarketId.get(targetMarketId)?.price,
+          };
+        }
+
+        if (targetMarketId === marketId) {
+          return {
+            symbol: marketSymbol,
+            baseAsset,
+            precision,
+            price: snapshotByMarketId.get(targetMarketId)?.price,
+          };
+        }
+
+        return {
+          symbol: `Market #${targetMarketId}`,
+          baseAsset: 'Units',
+          precision,
+          price: snapshotByMarketId.get(targetMarketId)?.price,
+        };
+      },
+    [baseAsset, marketById, marketId, marketSymbol, precision, snapshotByMarketId]
+  );
   const openPositionStates = useMemo(
     () =>
-      positionStates
+      positionRows
         .filter(position => position.availableQuantity > 0)
         .sort((left, right) => {
           if (left.side !== right.side) {
@@ -176,25 +152,50 @@ export function LivePositionsPanel({
 
           return right.availableQuantity - left.availableQuantity;
         }),
-    [positionStates]
+    [positionRows]
   );
   const pendingOrders = useMemo(
-    () => ordersState.filter(order => order.status === ORDER_STATUS_OPEN),
-    [ordersState]
+    () => ordersRows.filter(order => order.status === ORDER_STATUS_OPEN),
+    [ordersRows]
   );
+  const sortedOpenPositionLotRows = useMemo(() => {
+    return [...openPositionLotRows].sort((left, right) => {
+      const leftOpenedAt = left.openedAt.toMillis();
+      const rightOpenedAt = right.openedAt.toMillis();
+
+      if (leftOpenedAt !== rightOpenedAt) {
+        return leftOpenedAt > rightOpenedAt ? -1 : 1;
+      }
+
+      if (left.marketId !== right.marketId) {
+        return left.marketId - right.marketId;
+      }
+
+      if (left.side !== right.side) {
+        return left.side.localeCompare(right.side);
+      }
+
+      if (left.id === right.id) {
+        return 0;
+      }
+
+      return left.id < right.id ? -1 : 1;
+    });
+  }, [openPositionLotRows]);
   const groupedOpenPositionOpenedAtBySide = useMemo(() => {
     const earliestBySide = new Map<string, OpenPositionLotState['openedAt']>();
 
-    for (const lot of openPositionLots) {
-      const earliest = earliestBySide.get(lot.side);
+    for (const lot of sortedOpenPositionLotRows) {
+      const key = `${lot.marketId}:${lot.side}`;
+      const earliest = earliestBySide.get(key);
 
       if (!earliest || lot.openedAt.toMillis() < earliest.toMillis()) {
-        earliestBySide.set(lot.side, lot.openedAt);
+        earliestBySide.set(key, lot.openedAt);
       }
     }
 
     return earliestBySide;
-  }, [openPositionLots]);
+  }, [sortedOpenPositionLotRows]);
 
   useEffect(() => {
     setPartialCloseInput(defaultTradeQuantity);
@@ -273,7 +274,7 @@ export function LivePositionsPanel({
     setIsSubmitting(true);
 
     try {
-      await closeMarketPosition({ marketId, side: position.side, quantity });
+      await closeMarketPosition({ marketId: position.marketId, side: position.side, quantity });
       setIsModifyDialogOpen(false);
       setSelectedPosition(null);
       setPartialCloseInput(defaultTradeQuantity);
@@ -301,7 +302,7 @@ export function LivePositionsPanel({
     setIsSubmitting(true);
 
     try {
-      await closeMarketPosition({ marketId, side: lot.side, quantity: lot.quantity });
+      await closeMarketPosition({ marketId: lot.marketId, side: lot.side, quantity: lot.quantity });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to close position.');
     } finally {
@@ -419,7 +420,7 @@ export function LivePositionsPanel({
                     <div className="text-xs text-slate-500">
                       {showGroupedPositions
                         ? `Grouped into ${openPositionStates.length} side-specific position${openPositionStates.length === 1 ? '' : 's'}`
-                        : `Showing ${openPositionLots.length} individual trade${openPositionLots.length === 1 ? '' : 's'}`}
+                        : `Showing ${sortedOpenPositionLotRows.length} individual trade${sortedOpenPositionLotRows.length === 1 ? '' : 's'}`}
                     </div>
                     <div className="flex items-center gap-2">
                       <Button type="button" variant="outline" size="sm" onClick={() => setShowGroupedPositions(current => !current)}>
@@ -445,14 +446,14 @@ export function LivePositionsPanel({
                       {showGroupedPositions ? (
                         openPositionStates.map(positionState => (
                           <TableRow key={`${positionState.marketId}:${positionState.side}`}>
-                            <TableCell>{marketSymbol}</TableCell>
+                            <TableCell>{getMarketMeta(positionState.marketId).symbol}</TableCell>
                             <TableCell className={positionState.side === ORDER_SIDE_BUY ? 'text-emerald-300' : 'text-rose-300'}>
                               {positionState.side}
                             </TableCell>
                             <TableCell className="text-right">{positionState.availableQuantity.toFixed(4)}</TableCell>
-                            <TableCell className="text-right">{formatPrice(positionState.averageEntryPrice, precision)}</TableCell>
-                            <TableCell className="text-right">{formatPrice(positionState.markPrice, precision)}</TableCell>
-                            <TableCell>{formatTimestamp(groupedOpenPositionOpenedAtBySide.get(positionState.side))}</TableCell>
+                            <TableCell className="text-right">{formatPrice(positionState.averageEntryPrice, getMarketMeta(positionState.marketId).precision)}</TableCell>
+                            <TableCell className="text-right">{formatPrice(positionState.markPrice, getMarketMeta(positionState.marketId).precision)}</TableCell>
+                            <TableCell>{formatTimestamp(groupedOpenPositionOpenedAtBySide.get(`${positionState.marketId}:${positionState.side}`))}</TableCell>
                             <TableCell className={`text-right ${positionState.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                               {formatSignedCurrencyAmount(positionState.unrealizedPnl, currency)}
                             </TableCell>
@@ -475,9 +476,13 @@ export function LivePositionsPanel({
                                   variant="outline"
                                   size="sm"
                                   onClick={() => {
+                                    const positionMarket = getMarketMeta(positionState.marketId);
                                     setSelectedPosition(positionState);
                                     setPartialCloseInput(
-                                      Math.min(Number.parseFloat(defaultTradeQuantity), positionState.availableQuantity).toString()
+                                      Math.min(
+                                        Number.parseFloat(getDefaultTradeQuantity(positionMarket.baseAsset)),
+                                        positionState.availableQuantity
+                                      ).toString()
                                     );
                                     setIsModifyDialogOpen(true);
                                   }}
@@ -489,15 +494,15 @@ export function LivePositionsPanel({
                           </TableRow>
                         ))
                       ) : (
-                        openPositionLots.map(positionLot => (
+                        sortedOpenPositionLotRows.map(positionLot => (
                           <TableRow key={positionLot.id.toString()} className="group">
-                            <TableCell>{marketSymbol}</TableCell>
+                            <TableCell>{getMarketMeta(positionLot.marketId).symbol}</TableCell>
                             <TableCell className={positionLot.side === ORDER_SIDE_BUY ? 'text-emerald-300' : 'text-rose-300'}>
                               {positionLot.side}
                             </TableCell>
                             <TableCell className="text-right">{positionLot.quantity.toFixed(4)}</TableCell>
-                            <TableCell className="text-right">{formatPrice(positionLot.openPrice, precision)}</TableCell>
-                            <TableCell className="text-right">{formatPrice(positionLot.currentPrice, precision)}</TableCell>
+                            <TableCell className="text-right">{formatPrice(positionLot.openPrice, getMarketMeta(positionLot.marketId).precision)}</TableCell>
+                            <TableCell className="text-right">{formatPrice(positionLot.currentPrice, getMarketMeta(positionLot.marketId).precision)}</TableCell>
                             <TableCell>{formatTimestamp(positionLot.openedAt)}</TableCell>
                             <TableCell className={`text-right ${positionLot.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                               {formatSignedCurrencyAmount(positionLot.unrealizedPnl, currency)}
@@ -528,7 +533,7 @@ export function LivePositionsPanel({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-sm text-slate-500">
-                  No open positions for this market.
+                  No open positions.
                 </div>
               )}
             </TabsContent>
@@ -536,21 +541,22 @@ export function LivePositionsPanel({
             <TabsContent value="pending" className="space-y-2">
               {pendingOrders.length === 0 ? (
                 <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-sm text-slate-500">
-                  No pending orders for this market.
+                  No pending orders.
                 </div>
               ) : (
                 pendingOrders.slice(0, 6).map(order => {
                   const sideClass = order.side === ORDER_SIDE_BUY ? 'text-emerald-300' : 'text-rose-300';
+                  const marketMeta = getMarketMeta(order.marketId);
 
                   return (
                     <div key={order.id.toString()} className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className={`text-sm font-medium ${sideClass}`}>
-                            {order.executionType === ORDER_EXECUTION_TYPE_OPEN ? 'Open' : 'Close'} {order.side === ORDER_SIDE_BUY ? 'Buy' : 'Sell'} {order.quantity.toFixed(4)} {baseAsset}
+                            {marketMeta.symbol} | {order.executionType === ORDER_EXECUTION_TYPE_OPEN ? 'Open' : 'Close'} {order.side === ORDER_SIDE_BUY ? 'Buy' : 'Sell'} {order.quantity.toFixed(4)} {marketMeta.baseAsset}
                           </div>
                           <div className="mt-1 text-xs text-slate-500">
-                            {order.orderType} @ {formatPrice(order.limitPrice ?? snapshot?.price ?? 0, precision)}
+                            {order.orderType} @ {formatPrice(order.limitPrice ?? marketMeta.price ?? 0, marketMeta.precision)}
                           </div>
                         </div>
                         <Button
@@ -572,23 +578,24 @@ export function LivePositionsPanel({
             </TabsContent>
 
             <TabsContent value="closed" className="space-y-2">
-              {positionHistoryState.length === 0 ? (
+              {positionHistoryRows.length === 0 ? (
                 <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-sm text-slate-500">
-                  No closed history for this market yet.
+                  No closed history yet.
                 </div>
               ) : (
-                positionHistoryState.slice(0, 6).map(positionHistory => {
+                positionHistoryRows.slice(0, 6).map(positionHistory => {
                   const realizedPnlClass = positionHistory.realizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300';
+                  const marketMeta = getMarketMeta(positionHistory.marketId);
 
                   return (
                     <div key={positionHistory.id.toString()} className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="text-sm font-medium text-white">
-                            Closed {positionHistory.quantity.toFixed(4)} {baseAsset}
+                            {marketMeta.symbol} | Closed {positionHistory.quantity.toFixed(4)} {marketMeta.baseAsset}
                           </div>
                           <div className="mt-1 text-xs text-slate-500">
-                            Entry {formatPrice(positionHistory.entryPrice, precision)} · Exit {formatPrice(positionHistory.exitPrice, precision)}
+                            Entry {formatPrice(positionHistory.entryPrice, marketMeta.precision)} | Exit {formatPrice(positionHistory.exitPrice, marketMeta.precision)}
                           </div>
                           <div className={`mt-1 text-xs ${realizedPnlClass}`}>
                             Realized {formatSignedCurrencyAmount(positionHistory.realizedPnl, currency)}
@@ -622,65 +629,73 @@ export function LivePositionsPanel({
             showCloseButton={false}
             className="max-w-md p-0 text-slate-300 shadow-[0_30px_100px_rgba(0,0,0,0.42)]"
           >
-            <DialogHeader className="p-4 pb-0">
-              <DialogTitle className="text-sm font-medium text-white">
-                Partial close {selectedPosition.side} {marketSymbol}
-              </DialogTitle>
-              <DialogDescription className="sr-only">
-                Choose how much of the open {selectedPosition.side} position to close.
-              </DialogDescription>
-            </DialogHeader>
+            {(() => {
+              const selectedMarket = getMarketMeta(selectedPosition.marketId);
 
-            <div className="space-y-4 p-4">
-              <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-xs text-slate-400">
-                Open size {selectedPosition.availableQuantity.toFixed(4)} {baseAsset} · Mark {formatPrice(selectedPosition.markPrice, precision)}
-              </div>
+              return (
+                <>
+                  <DialogHeader className="p-4 pb-0">
+                    <DialogTitle className="text-sm font-medium text-white">
+                      Partial close {selectedPosition.side} {selectedMarket.symbol}
+                    </DialogTitle>
+                    <DialogDescription className="sr-only">
+                      Choose how much of the open {selectedPosition.side} position to close.
+                    </DialogDescription>
+                  </DialogHeader>
 
-              <div className="space-y-2">
-                <span className="block text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                  Close quantity ({baseAsset})
-                </span>
-                <Input
-                  type="number"
-                  min="0"
-                  max={selectedPosition.availableQuantity}
-                  step="any"
-                  value={partialCloseInput}
-                  onChange={event => setPartialCloseInput(event.target.value)}
-                  placeholder={defaultTradeQuantity}
-                  className="border-white/8 bg-white/3 text-white"
-                />
-              </div>
+                  <div className="space-y-4 p-4">
+                    <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-xs text-slate-400">
+                      Open size {selectedPosition.availableQuantity.toFixed(4)} {selectedMarket.baseAsset} | Mark {formatPrice(selectedPosition.markPrice, selectedMarket.precision)}
+                    </div>
 
-              <DialogFooter className="flex-row gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => {
-                    setIsModifyDialogOpen(false);
-                    setSelectedPosition(null);
-                  }}
-                >
-                  Keep open
-                </Button>
-                <Button
-                  type="button"
-                  variant="default"
-                  className="flex-1 bg-rose-400/15 text-rose-100 hover:bg-rose-400/20"
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    void handleSubmitPartialClose();
-                  }}
-                >
-                  {isSubmitting
-                    ? 'Closing...'
-                    : selectedPosition.side === ORDER_SIDE_BUY
-                      ? 'Sell to close'
-                      : 'Buy to close'}
-                </Button>
-              </DialogFooter>
-            </div>
+                    <div className="space-y-2">
+                      <span className="block text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                        Close quantity ({selectedMarket.baseAsset})
+                      </span>
+                      <Input
+                        type="number"
+                        min="0"
+                        max={selectedPosition.availableQuantity}
+                        step="any"
+                        value={partialCloseInput}
+                        onChange={event => setPartialCloseInput(event.target.value)}
+                        placeholder={getDefaultTradeQuantity(selectedMarket.baseAsset)}
+                        className="border-white/8 bg-white/3 text-white"
+                      />
+                    </div>
+
+                    <DialogFooter className="flex-row gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => {
+                          setIsModifyDialogOpen(false);
+                          setSelectedPosition(null);
+                        }}
+                      >
+                        Keep open
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="default"
+                        className="flex-1 bg-rose-400/15 text-rose-100 hover:bg-rose-400/20"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          void handleSubmitPartialClose();
+                        }}
+                      >
+                        {isSubmitting
+                          ? 'Closing...'
+                          : selectedPosition.side === ORDER_SIDE_BUY
+                            ? 'Sell to close'
+                            : 'Buy to close'}
+                      </Button>
+                    </DialogFooter>
+                  </div>
+                </>
+              );
+            })()}
           </DialogContent>
         ) : null}
       </Dialog>
