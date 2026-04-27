@@ -24,9 +24,9 @@ const onConnect = spacetimedb.clientConnected(ctx => {
     seedSimulator(ctx);
   }
 
-  if (ctx.senderAuth.hasJWT) {
-    ensureAuth0Jwt(ctx);
-  }
+  // if (ctx.senderAuth.hasJWT) {
+  //   ensureAuth0Jwt(ctx);
+  // }
 });
 
 const onDisconnect = spacetimedb.clientDisconnected(() => {

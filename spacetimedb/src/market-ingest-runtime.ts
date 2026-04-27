@@ -86,6 +86,11 @@ function getExternalOrderBookLevelId(marketId: number, isBid: boolean, level: nu
   return BigInt(marketId) * BigInt(1_000) + BigInt(level * 2 + (isBid ? 1 : 0));
 }
 
+function getDayBucketStartMillis(bucketStartMillis: number) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  return Math.floor(bucketStartMillis / dayMs) * dayMs;
+}
+
 function triggerMarketDataSideEffects(
   ctx: ExchangeCtx,
   marketId: number,
@@ -272,6 +277,43 @@ function upsertExternalDayCandles(
   }
 }
 
+function deleteExternalCandlesInRange(
+  ctx: ExchangeCtx,
+  marketId: number,
+  startMillisInclusive: number,
+  endMillisExclusive: number
+) {
+  requireExternalMarketDataMode();
+  requireExistingMarket(ctx, marketId);
+
+  if (!Number.isFinite(startMillisInclusive) || !Number.isFinite(endMillisExclusive)) {
+    throw new SenderError('Candle deletion range must use finite timestamps.');
+  }
+
+  if (endMillisExclusive <= startMillisInclusive) {
+    throw new SenderError('Candle deletion range end must be greater than start.');
+  }
+
+  for (const row of Array.from(ctx.db.marketMinuteCandle.marketId.filter(marketId))) {
+    const bucketStartMillis = Number(row.bucketStart.toMillis());
+
+    if (bucketStartMillis >= startMillisInclusive && bucketStartMillis < endMillisExclusive) {
+      ctx.db.marketMinuteCandle.delete(row);
+    }
+  }
+
+  const dayStartMillisInclusive = getDayBucketStartMillis(startMillisInclusive);
+  const dayStartMillisExclusive = getDayBucketStartMillis(endMillisExclusive - 1) + 24 * 60 * 60 * 1000;
+
+  for (const row of Array.from(ctx.db.marketDayCandle.marketId.filter(marketId))) {
+    const bucketStartMillis = Number(row.bucketStart.toMillis());
+
+    if (bucketStartMillis >= dayStartMillisInclusive && bucketStartMillis < dayStartMillisExclusive) {
+      ctx.db.marketDayCandle.delete(row);
+    }
+  }
+}
+
 function replaceExternalMarketOrderBook(
   ctx: ExchangeCtx,
   marketId: number,
@@ -318,6 +360,7 @@ function replaceExternalMarketOrderBook(
 }
 
 export {
+  deleteExternalCandlesInRange,
   replaceExternalMarketOrderBook,
   requireExternalMarketDataMode,
   upsertExternalDayCandle,

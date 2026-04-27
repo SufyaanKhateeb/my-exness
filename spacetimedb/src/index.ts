@@ -11,6 +11,7 @@ export { init, onConnect, onDisconnect } from './lifecycle';
 export { add, sayHello } from './misc-api';
 export {
   bootstrapExternalMarket,
+  deleteExternalCandlesInRange,
   ingestExternalMarketSnapshot,
   replaceExternalOrderBook,
   upsertExternalDayCandle,

@@ -4,6 +4,7 @@ import spacetimedb from './module';
 import { MARKET_INGEST_PERMISSION } from './simulator-config';
 import { ensurePermission } from './simulator-auth';
 import {
+  deleteExternalCandlesInRange as deleteExternalCandlesInRangeRows,
   replaceExternalMarketOrderBook,
   upsertExternalDayCandle as upsertExternalDayCandleRow,
   upsertExternalDayCandles as upsertExternalDayCandleRows,
@@ -156,8 +157,26 @@ const upsertExternalDayCandles = spacetimedb.reducer(
   }
 );
 
+const deleteExternalCandlesInRange = spacetimedb.reducer(
+  {
+    marketId: t.u32(),
+    startMillisInclusive: t.u64(),
+    endMillisExclusive: t.u64(),
+  },
+  (ctx, input) => {
+    ensurePermission(ctx, MARKET_INGEST_PERMISSION);
+    deleteExternalCandlesInRangeRows(
+      ctx,
+      input.marketId,
+      Number(input.startMillisInclusive),
+      Number(input.endMillisExclusive),
+    );
+  }
+);
+
 export {
   bootstrapExternalMarket,
+  deleteExternalCandlesInRange,
   ingestExternalMarketSnapshot,
   replaceExternalOrderBook,
   upsertExternalDayCandle,
