@@ -30,7 +30,7 @@ export default function MarketTerminal() {
 
   if (!marketsReady || !selectedMarket) {
     return (
-      <div className="flex min-h-155 items-center justify-center rounded-[28px] border border-white/8 bg-[#08111d] text-sm text-slate-400">
+      <div className="flex min-h-155 items-center justify-center bg-transparent border-none text-sm text-slate-400">
         <div className="flex items-center gap-3">
           <Spinner className="size-4" />
           <span>Loading simulated exchange...</span>

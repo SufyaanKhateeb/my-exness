@@ -12,6 +12,7 @@ import {
 
 export default __t.row({
   marketId: __t.u32().name("market_id"),
+  side: __t.string(),
   quantity: __t.f64(),
   reservedQuantity: __t.f64().name("reserved_quantity"),
   availableQuantity: __t.f64().name("available_quantity"),

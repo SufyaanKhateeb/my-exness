@@ -39,6 +39,7 @@ import BootstrapExternalMarketReducer from "./bootstrap_external_market_reducer"
 import CancelOrderReducer from "./cancel_order_reducer";
 import CloseMarketPositionReducer from "./close_market_position_reducer";
 import CreatePriceAlertReducer from "./create_price_alert_reducer";
+import DeleteExternalCandlesInRangeReducer from "./delete_external_candles_in_range_reducer";
 import DeleteNotificationReducer from "./delete_notification_reducer";
 import DeletePriceAlertReducer from "./delete_price_alert_reducer";
 import IngestExternalMarketSnapshotReducer from "./ingest_external_market_snapshot_reducer";
@@ -223,6 +224,7 @@ const reducersSchema = __reducers(
   __reducerSchema("cancel_order", CancelOrderReducer),
   __reducerSchema("close_market_position", CloseMarketPositionReducer),
   __reducerSchema("create_price_alert", CreatePriceAlertReducer),
+  __reducerSchema("delete_external_candles_in_range", DeleteExternalCandlesInRangeReducer),
   __reducerSchema("delete_notification", DeleteNotificationReducer),
   __reducerSchema("delete_price_alert", DeletePriceAlertReducer),
   __reducerSchema("ingest_external_market_snapshot", IngestExternalMarketSnapshotReducer),

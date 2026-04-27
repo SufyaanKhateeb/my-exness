@@ -37,6 +37,7 @@ import {
   fillTradeOrder,
   getAuth0UserIdBySenderIdentity,
   getAvailablePositionQuantity,
+  getOppositeOrderSide,
   getReferenceMarketPrice,
   getPositionId,
   inferPriceAlertDirection,
@@ -213,15 +214,6 @@ const placeMarketOrder = spacetimedb.reducer(
     }
 
     const now = ctx.timestamp;
-    const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
-    const positionSide = position && Math.abs(position.quantity) > POSITION_EPSILON
-      ? (position.quantity > 0 ? ORDER_SIDE_BUY : ORDER_SIDE_SELL)
-      : undefined;
-
-    if (positionSide && positionSide !== side) {
-      throw new SenderError('Close the current position before opening the opposite side.');
-    }
-
     const execution = executeAgainstOrderBook(ctx, marketId, side, quantity, undefined, now);
 
     if (!execution) {
@@ -272,15 +264,6 @@ const placeLimitOrder = spacetimedb.reducer(
     }
 
     const now = ctx.timestamp;
-    const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
-    const positionSide = position && Math.abs(position.quantity) > POSITION_EPSILON
-      ? (position.quantity > 0 ? ORDER_SIDE_BUY : ORDER_SIDE_SELL)
-      : undefined;
-
-    if (positionSide && positionSide !== side) {
-      throw new SenderError('Close the current position before opening the opposite side.');
-    }
-
     const accountLeverage = account.accountLeverage && account.accountLeverage > 0
       ? account.accountLeverage
       : DEFAULT_ACCOUNT_LEVERAGE;
@@ -321,22 +304,27 @@ const placeLimitOrder = spacetimedb.reducer(
 const closeMarketPosition = spacetimedb.reducer(
   {
     marketId: t.u32(),
+    side: t.string(),
     quantity: t.f64(),
   },
-  (ctx, { marketId, quantity }) => {
+  (ctx, { marketId, side, quantity }) => {
     const { auth0UserId } = ensureTradingResourceAccess(ctx);
     requirePositiveQuantity(quantity);
     ensureMarketSnapshot(ctx, marketId);
 
+    if (side !== ORDER_SIDE_BUY && side !== ORDER_SIDE_SELL) {
+      throw new SenderError('Unsupported order side.');
+    }
+
     const now = ctx.timestamp;
-    const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
+    const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId, side));
 
     if (!position || getAvailablePositionQuantity(position) + POSITION_EPSILON < quantity) {
       throw new SenderError('Insufficient available position quantity to close.');
     }
 
-    const side = position.quantity > 0 ? ORDER_SIDE_SELL : ORDER_SIDE_BUY;
-    const execution = executeAgainstOrderBook(ctx, marketId, side, quantity, undefined, now);
+    const closeOrderSide = getOppositeOrderSide(side);
+    const execution = executeAgainstOrderBook(ctx, marketId, closeOrderSide, quantity, undefined, now);
 
     if (!execution) {
       throw new SenderError('Insufficient order book size to close this position.');
@@ -346,7 +334,7 @@ const closeMarketPosition = spacetimedb.reducer(
       id: BigInt(0),
       auth0UserId,
       marketId,
-      side,
+      side: closeOrderSide,
       executionType: ORDER_EXECUTION_TYPE_CLOSE,
       orderType: ORDER_TYPE_MARKET,
       status: ORDER_STATUS_OPEN,
@@ -391,7 +379,9 @@ const cancelOrder = spacetimedb.reducer(
         account.updatedAt = now;
         ctx.db.tradingAccount.auth0UserId.update(account);
       } else {
-        const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, order.marketId));
+        const position = ctx.db.tradingPosition.id.find(
+          getPositionId(auth0UserId, order.marketId, getOppositeOrderSide(order.side))
+        );
 
         if (position) {
           position.reservedQuantity = Math.max(0, position.reservedQuantity - order.quantity);

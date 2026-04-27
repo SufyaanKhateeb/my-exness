@@ -11,6 +11,7 @@ import BootstrapExternalMarketReducer from "../bootstrap_external_market_reducer
 import CancelOrderReducer from "../cancel_order_reducer";
 import CloseMarketPositionReducer from "../close_market_position_reducer";
 import CreatePriceAlertReducer from "../create_price_alert_reducer";
+import DeleteExternalCandlesInRangeReducer from "../delete_external_candles_in_range_reducer";
 import DeleteNotificationReducer from "../delete_notification_reducer";
 import DeletePriceAlertReducer from "../delete_price_alert_reducer";
 import IngestExternalMarketSnapshotReducer from "../ingest_external_market_snapshot_reducer";
@@ -30,6 +31,7 @@ export type BootstrapExternalMarketParams = __Infer<typeof BootstrapExternalMark
 export type CancelOrderParams = __Infer<typeof CancelOrderReducer>;
 export type CloseMarketPositionParams = __Infer<typeof CloseMarketPositionReducer>;
 export type CreatePriceAlertParams = __Infer<typeof CreatePriceAlertReducer>;
+export type DeleteExternalCandlesInRangeParams = __Infer<typeof DeleteExternalCandlesInRangeReducer>;
 export type DeleteNotificationParams = __Infer<typeof DeleteNotificationReducer>;
 export type DeletePriceAlertParams = __Infer<typeof DeletePriceAlertReducer>;
 export type IngestExternalMarketSnapshotParams = __Infer<typeof IngestExternalMarketSnapshotReducer>;

@@ -94,6 +94,7 @@ export type MarketOrderState = __Infer<typeof MarketOrderState>;
 
 export const MarketPositionState = __t.object("MarketPositionState", {
   marketId: __t.u32(),
+  side: __t.string(),
   quantity: __t.f64(),
   reservedQuantity: __t.f64(),
   availableQuantity: __t.f64(),
@@ -321,6 +322,7 @@ export const TradingPosition = __t.object("TradingPosition", {
   id: __t.string(),
   auth0UserId: __t.string(),
   marketId: __t.u32(),
+  side: __t.string(),
   quantity: __t.f64(),
   reservedQuantity: __t.f64(),
   averageEntryPrice: __t.f64(),

@@ -79,6 +79,7 @@ const tradingAccountStateRow = t.row('TradingAccountState', {
 
 const marketPositionStateRow = t.row('MarketPositionState', {
   marketId: t.u32(),
+  side: t.string(),
   quantity: t.f64(),
   reservedQuantity: t.f64(),
   availableQuantity: t.f64(),
@@ -177,6 +178,7 @@ const tradingPositionRow = t.row('TradingPosition', {
   id: t.string().primaryKey(),
   auth0UserId: t.string().index(),
   marketId: t.u32().index(),
+  side: t.string(),
   quantity: t.f64(),
   reservedQuantity: t.f64(),
   averageEntryPrice: t.f64(),

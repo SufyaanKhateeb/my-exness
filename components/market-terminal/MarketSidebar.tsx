@@ -65,9 +65,9 @@ export function MarketSidebar({
             <CardDescription className="text-[11px] uppercase tracking-[0.28em]">Instruments</CardDescription>
             <CardTitle className="text-xl">Market watch</CardTitle>
           </div>
-          <Button type="button" variant="secondary" size="sm" onClick={onResetSimulation}>
+          {/* <Button type="button" variant="secondary" size="sm" onClick={onResetSimulation}>
             Reset tape
-          </Button>
+          </Button> */}
         </div>
 
         <div className="relative">

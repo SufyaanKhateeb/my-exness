@@ -74,8 +74,8 @@ function requireAllowedPriceAlertExpiryDays(expiryDays: number) {
   }
 }
 
-function getPositionId(auth0UserId: string, marketId: number) {
-  return `${auth0UserId}:${marketId}`;
+function getPositionId(auth0UserId: string, marketId: number, side: string) {
+  return `${auth0UserId}:${marketId}:${side}`;
 }
 
 function getAvailableBalance(account: { balance: number; reservedBalance: number }) {
@@ -87,11 +87,19 @@ function getAvailablePositionQuantity(position: { quantity: number; reservedQuan
     return 0;
   }
 
-  return Math.max(0, Math.abs(position.quantity) - position.reservedQuantity);
+  return Math.max(0, position.quantity - position.reservedQuantity);
 }
 
-function getPositionSideFromQuantity(quantity: number) {
-  return quantity >= 0 ? ORDER_SIDE_BUY : ORDER_SIDE_SELL;
+function getOppositeOrderSide(side: string) {
+  if (side === ORDER_SIDE_BUY) {
+    return ORDER_SIDE_SELL;
+  }
+
+  if (side === ORDER_SIDE_SELL) {
+    return ORDER_SIDE_BUY;
+  }
+
+  throw new SenderError('Unsupported order side.');
 }
 
 function getRequiredMargin(notional: number, accountLeverage: number) {
@@ -276,8 +284,13 @@ function computeTradingAccountState(ctx: TradingReadCtx, auth0UserId: string) {
       continue;
     }
 
-    const positionMarketValue = Math.abs(position.quantity) * snapshot.price;
-    const positionUnrealizedPnl = position.quantity * (snapshot.price - position.averageEntryPrice);
+    const positionMarketValue = position.quantity * snapshot.price;
+    const positionUnrealizedPnl = computeLotUnrealizedPnl(
+      position.side,
+      position.quantity,
+      position.averageEntryPrice,
+      snapshot.price
+    );
 
     unrealizedPnl += positionUnrealizedPnl;
     margin += positionMarketValue / accountLeverage;
@@ -305,20 +318,23 @@ function computeTradingAccountState(ctx: TradingReadCtx, auth0UserId: string) {
   };
 }
 
-function computeMarketPositionState(ctx: TradingReadCtx, auth0UserId: string, marketId: number) {
-  const position = ctx.db.tradingPosition.id.find(getPositionId(auth0UserId, marketId));
-
-  if (!position) {
-    return undefined;
-  }
-
-  const snapshot = ctx.db.marketSnapshot.marketId.find(marketId);
+function computeMarketPositionState(
+  ctx: TradingReadCtx,
+  position: TradingPositionRowType
+) {
+  const snapshot = ctx.db.marketSnapshot.marketId.find(position.marketId);
   const markPrice = snapshot?.price ?? position.averageEntryPrice;
-  const marketValue = Math.abs(position.quantity) * markPrice;
-  const unrealizedPnl = position.quantity * (markPrice - position.averageEntryPrice);
+  const marketValue = position.quantity * markPrice;
+  const unrealizedPnl = computeLotUnrealizedPnl(
+    position.side,
+    position.quantity,
+    position.averageEntryPrice,
+    markPrice
+  );
 
   return {
-    marketId,
+    marketId: position.marketId,
+    side: position.side,
     quantity: position.quantity,
     reservedQuantity: position.reservedQuantity,
     availableQuantity: getAvailablePositionQuantity(position),
@@ -332,8 +348,7 @@ function computeMarketPositionState(ctx: TradingReadCtx, auth0UserId: string, ma
 
 function listMarketPositionStateRows(ctx: TradingReadCtx, auth0UserId: string) {
   return (Array.from(ctx.db.tradingPosition.auth0UserId.filter(auth0UserId)) as TradingPositionRowType[])
-    .map(position => computeMarketPositionState(ctx, auth0UserId, position.marketId))
-    .filter(position => position !== undefined);
+    .map(position => computeMarketPositionState(ctx, position));
 }
 
 function listOpenPositionLotStateRows(ctx: TradingReadCtx, auth0UserId: string) {
@@ -540,12 +555,13 @@ function upsertTradingPosition(
   ctx: ExchangeCtx,
   auth0UserId: string,
   marketId: number,
+  side: string,
   nextQuantity: number,
   reservedQuantity: number,
   averageEntryPrice: number,
   updatedAt: ExchangeCtx['timestamp']
 ) {
-  const positionId = getPositionId(auth0UserId, marketId);
+  const positionId = getPositionId(auth0UserId, marketId, side);
   const normalizedQuantity = normalizeQuantity(nextQuantity);
   const normalizedReservedQuantity = normalizeQuantity(reservedQuantity);
   const existingPosition = ctx.db.tradingPosition.id.find(positionId);
@@ -570,6 +586,7 @@ function upsertTradingPosition(
     id: positionId,
     auth0UserId,
     marketId,
+    side,
     quantity: normalizedQuantity,
     reservedQuantity: normalizedReservedQuantity,
     averageEntryPrice: normalizedQuantity === 0 ? 0 : averageEntryPrice,
@@ -659,18 +676,12 @@ function fillTradeOrder(
 
   const account = ensureTradingAccount(ctx, order.auth0UserId);
   const notional = order.quantity * fillPrice;
-  const positionId = getPositionId(order.auth0UserId, order.marketId);
-  const existingPosition = ctx.db.tradingPosition.id.find(positionId);
   const accountLeverage = account.accountLeverage > 0 ? account.accountLeverage : DEFAULT_ACCOUNT_LEVERAGE;
 
   if (order.executionType === ORDER_EXECUTION_TYPE_OPEN) {
-    const existingPositionSide = existingPosition && Math.abs(existingPosition.quantity) > POSITION_EPSILON
-      ? getPositionSideFromQuantity(existingPosition.quantity)
-      : undefined;
-
-    if (existingPositionSide && existingPositionSide !== order.side) {
-      throw new SenderError('Close the current position before opening the opposite side.');
-    }
+    const existingPosition = ctx.db.tradingPosition.id.find(
+      getPositionId(order.auth0UserId, order.marketId, order.side)
+    );
 
     const requiredMargin = getRequiredMargin(notional, accountLeverage);
     const reservedMargin = order.orderType === ORDER_TYPE_LIMIT
@@ -695,18 +706,18 @@ function fillTradeOrder(
       ctx.db.tradingAccount.auth0UserId.update(account);
     }
 
-    const currentAbsoluteQuantity = Math.abs(existingPosition?.quantity ?? 0);
-    const nextAbsoluteQuantity = currentAbsoluteQuantity + order.quantity;
-    const currentCostBasis = currentAbsoluteQuantity * (existingPosition?.averageEntryPrice ?? 0);
-    const nextAverageEntryPrice = nextAbsoluteQuantity > 0
-      ? (currentCostBasis + notional) / nextAbsoluteQuantity
+    const currentQuantity = existingPosition?.quantity ?? 0;
+    const nextQuantity = currentQuantity + order.quantity;
+    const currentCostBasis = currentQuantity * (existingPosition?.averageEntryPrice ?? 0);
+    const nextAverageEntryPrice = nextQuantity > 0
+      ? (currentCostBasis + notional) / nextQuantity
       : 0;
-    const nextQuantity = order.side === ORDER_SIDE_BUY ? nextAbsoluteQuantity : -nextAbsoluteQuantity;
 
     upsertTradingPosition(
       ctx,
       order.auth0UserId,
       order.marketId,
+      order.side,
       nextQuantity,
       existingPosition?.reservedQuantity ?? 0,
       nextAverageEntryPrice,
@@ -724,15 +735,13 @@ function fillTradeOrder(
       updatedAt: filledAt,
     });
   } else {
-    if (!existingPosition || Math.abs(existingPosition.quantity) + POSITION_EPSILON < order.quantity) {
+    const openingSide = getOppositeOrderSide(order.side);
+    const existingPosition = ctx.db.tradingPosition.id.find(
+      getPositionId(order.auth0UserId, order.marketId, openingSide)
+    );
+
+    if (!existingPosition || existingPosition.quantity + POSITION_EPSILON < order.quantity) {
       throw new SenderError('Insufficient position quantity for this close order.');
-    }
-
-    const openingSide = getPositionSideFromQuantity(existingPosition.quantity);
-    const expectedCloseSide = openingSide === ORDER_SIDE_BUY ? ORDER_SIDE_SELL : ORDER_SIDE_BUY;
-
-    if (order.side !== expectedCloseSide) {
-      throw new SenderError('Close orders must use the opposite side of the open position.');
     }
 
     if (order.orderType === ORDER_TYPE_LIMIT && existingPosition.reservedQuantity + POSITION_EPSILON < order.quantity) {
@@ -754,23 +763,19 @@ function fillTradeOrder(
     account.updatedAt = filledAt;
     ctx.db.tradingAccount.auth0UserId.update(account);
 
-    const nextAbsoluteQuantity = Math.max(0, Math.abs(existingPosition.quantity) - order.quantity);
+    const nextQuantity = Math.max(0, existingPosition.quantity - order.quantity);
     const nextReservedQuantity = order.orderType === ORDER_TYPE_LIMIT
       ? Math.max(0, existingPosition.reservedQuantity - order.quantity)
       : existingPosition.reservedQuantity;
-    const nextQuantity = nextAbsoluteQuantity === 0
-      ? 0
-      : openingSide === ORDER_SIDE_BUY
-        ? nextAbsoluteQuantity
-        : -nextAbsoluteQuantity;
 
     upsertTradingPosition(
       ctx,
       order.auth0UserId,
       order.marketId,
+      openingSide,
       nextQuantity,
       nextReservedQuantity,
-      nextAbsoluteQuantity > 0 ? existingPosition.averageEntryPrice : 0,
+      nextQuantity > 0 ? existingPosition.averageEntryPrice : 0,
       filledAt
     );
   }
@@ -842,6 +847,7 @@ export {
   getAvailablePositionQuantity,
   getReferenceMarketPrice,
   getPositionId,
+  getOppositeOrderSide,
   inferPriceAlertDirection,
   listMarketOrderStateRows,
   listMarketPositionStateRows,

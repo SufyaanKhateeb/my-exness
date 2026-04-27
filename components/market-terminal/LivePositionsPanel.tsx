@@ -4,19 +4,20 @@ import { useUser } from '@auth0/nextjs-auth0/client';
 import { useEffect, useMemo, useState } from 'react';
 import { useReducer, useSpacetimeDB, useTable } from 'spacetimedb/react';
 
-import LoginButton from '@/components/LoginButton';
 import { type TradingPanelProps } from '@/components/market-terminal/trading-panel.types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { CircleX } from 'lucide-react';
 import { formatPrice } from '@/lib/market-terminal';
 import { DbConnection, reducers, tables } from '@/src/module_bindings';
 
 const ORDER_SIDE_BUY = 'buy';
-const ORDER_SIDE_SELL = 'sell';
 const ORDER_EXECUTION_TYPE_OPEN = 'open';
 const ORDER_STATUS_OPEN = 'open';
 
@@ -26,7 +27,9 @@ type TradingAccountState = {
 
 type MarketPositionState = {
   marketId: number;
+  side: string;
   quantity: number;
+  reservedQuantity: number;
   availableQuantity: number;
   averageEntryPrice: number;
   markPrice: number;
@@ -130,8 +133,10 @@ export function LivePositionsPanel({
   const [showGroupedPositions, setShowGroupedPositions] = useState(false);
   const [isModifyDialogOpen, setIsModifyDialogOpen] = useState(false);
   const [partialCloseInput, setPartialCloseInput] = useState(() => getDefaultTradeQuantity(baseAsset));
+  const [selectedPosition, setSelectedPosition] = useState<MarketPositionState | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [closingLotId, setClosingLotId] = useState<bigint | null>(null);
   const [isCancellingOrderId, setIsCancellingOrderId] = useState<string | null>(null);
   const [hasTradingAccess, setHasTradingAccess] = useState(false);
   const [hasTradingAccessResolved, setHasTradingAccessResolved] = useState(false);
@@ -154,33 +159,41 @@ export function LivePositionsPanel({
 
   const snapshot = (snapshots[0] as MarketSnapshotState | undefined) ?? null;
   const accountState = (accountRows[0] as TradingAccountState | undefined) ?? null;
-  const positionState = (positionRows[0] as MarketPositionState | undefined) ?? null;
+  const positionStates = positionRows as readonly MarketPositionState[];
   const ordersState = ordersRows as readonly MarketOrderState[];
   const openPositionLots = openPositionLotRows as readonly OpenPositionLotState[];
   const positionHistoryState = positionHistoryRows as readonly PositionHistoryState[];
   const currency = accountState?.currency ?? quoteAsset;
   const defaultTradeQuantity = useMemo(() => getDefaultTradeQuantity(baseAsset), [baseAsset]);
+  const openPositionStates = useMemo(
+    () =>
+      positionStates
+        .filter(position => position.availableQuantity > 0)
+        .sort((left, right) => {
+          if (left.side !== right.side) {
+            return left.side === ORDER_SIDE_BUY ? -1 : 1;
+          }
+
+          return right.availableQuantity - left.availableQuantity;
+        }),
+    [positionStates]
+  );
   const pendingOrders = useMemo(
     () => ordersState.filter(order => order.status === ORDER_STATUS_OPEN),
     [ordersState]
   );
-  const groupedPositionSide = positionState
-    ? positionState.quantity >= 0
-      ? ORDER_SIDE_BUY
-      : ORDER_SIDE_SELL
-    : ORDER_SIDE_BUY;
-  const groupedOpenPositionOpenedAt = useMemo(() => {
-    if (openPositionLots.length === 0) {
-      return undefined;
+  const groupedOpenPositionOpenedAtBySide = useMemo(() => {
+    const earliestBySide = new Map<string, OpenPositionLotState['openedAt']>();
+
+    for (const lot of openPositionLots) {
+      const earliest = earliestBySide.get(lot.side);
+
+      if (!earliest || lot.openedAt.toMillis() < earliest.toMillis()) {
+        earliestBySide.set(lot.side, lot.openedAt);
+      }
     }
 
-    return openPositionLots.reduce((earliest, lot) => {
-      if (!earliest) {
-        return lot.openedAt;
-      }
-
-      return lot.openedAt.toMillis() < earliest.toMillis() ? lot.openedAt : earliest;
-    }, undefined as OpenPositionLotState['openedAt'] | undefined);
+    return earliestBySide;
   }, [openPositionLots]);
 
   useEffect(() => {
@@ -239,10 +252,10 @@ export function LivePositionsPanel({
     ? false
     : hasTradingAccessResolved && accountReady && positionReady && ordersReady && openPositionLotsReady && positionHistoryReady;
 
-  async function handleCloseOpenPosition(quantity: number) {
+  async function handleCloseOpenPosition(position: MarketPositionState, quantity: number) {
     setErrorMessage(null);
 
-    if (!positionState || positionState.availableQuantity <= 0) {
+    if (position.availableQuantity <= 0) {
       setErrorMessage('No open position is available to close.');
       return;
     }
@@ -252,7 +265,7 @@ export function LivePositionsPanel({
       return;
     }
 
-    if (quantity > positionState.availableQuantity) {
+    if (quantity > position.availableQuantity) {
       setErrorMessage('Close quantity cannot exceed the open position size.');
       return;
     }
@@ -260,8 +273,9 @@ export function LivePositionsPanel({
     setIsSubmitting(true);
 
     try {
-      await closeMarketPosition({ marketId, quantity });
+      await closeMarketPosition({ marketId, side: position.side, quantity });
       setIsModifyDialogOpen(false);
+      setSelectedPosition(null);
       setPartialCloseInput(defaultTradeQuantity);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to close position.');
@@ -272,7 +286,28 @@ export function LivePositionsPanel({
 
   async function handleSubmitPartialClose() {
     const quantity = Number.parseFloat(partialCloseInput);
-    await handleCloseOpenPosition(quantity);
+
+    if (!selectedPosition) {
+      setErrorMessage('Select a position to close.');
+      return;
+    }
+
+    await handleCloseOpenPosition(selectedPosition, quantity);
+  }
+
+  async function handleCloseLot(lot: OpenPositionLotState) {
+    setErrorMessage(null);
+    setClosingLotId(lot.id);
+    setIsSubmitting(true);
+
+    try {
+      await closeMarketPosition({ marketId, side: lot.side, quantity: lot.quantity });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to close position.');
+    } finally {
+      setIsSubmitting(false);
+      setClosingLotId(null);
+    }
   }
 
   async function handleCancelOrder(orderId: bigint) {
@@ -290,7 +325,7 @@ export function LivePositionsPanel({
 
   if (isLoading) {
     return (
-      <Card className="rounded-[24px] border-white/8 bg-[#08111d] text-slate-300 shadow-none">
+      <Card className="bg-transparent border-none text-primary shadow-none">
         <CardContent className="p-4 text-sm text-slate-400">
           <div className="flex items-center gap-3">
             <Spinner className="size-4" />
@@ -356,7 +391,9 @@ export function LivePositionsPanel({
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-sm font-medium text-white">Positions</CardTitle>
             <span className="text-[11px] text-slate-500">
-              {positionState && positionState.availableQuantity > 0 ? '1 open' : 'No open position'}
+              {openPositionStates.length > 0
+                ? `${openPositionStates.length} open position${openPositionStates.length === 1 ? '' : 's'}`
+                : 'No open position'}
             </span>
           </div>
         </CardHeader>
@@ -376,42 +413,17 @@ export function LivePositionsPanel({
             </TabsList>
 
             <TabsContent value="open" className="space-y-2">
-              {positionState && positionState.availableQuantity > 0 ? (
+              {openPositionStates.length > 0 ? (
                 <div className="space-y-3 rounded-2xl border border-white/8 bg-white/3 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-xs text-slate-500">
                       {showGroupedPositions
-                        ? `Grouped ${openPositionLots.length} open trade${openPositionLots.length === 1 ? '' : 's'}`
+                        ? `Grouped into ${openPositionStates.length} side-specific position${openPositionStates.length === 1 ? '' : 's'}`
                         : `Showing ${openPositionLots.length} individual trade${openPositionLots.length === 1 ? '' : 's'}`}
                     </div>
                     <div className="flex items-center gap-2">
                       <Button type="button" variant="outline" size="sm" onClick={() => setShowGroupedPositions(current => !current)}>
                         {showGroupedPositions ? 'Show individual positions' : 'Group positions'}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="default"
-                        size="sm"
-                        className="bg-rose-400/15 text-rose-100 hover:bg-rose-400/20"
-                        disabled={isSubmitting}
-                        onClick={() => {
-                          void handleCloseOpenPosition(positionState.availableQuantity);
-                        }}
-                      >
-                        {isSubmitting ? 'Closing...' : 'Close grouped'}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setPartialCloseInput(
-                            Math.min(Number.parseFloat(defaultTradeQuantity), positionState.availableQuantity).toString()
-                          );
-                          setIsModifyDialogOpen(true);
-                        }}
-                      >
-                        Modify grouped
                       </Button>
                     </div>
                   </div>
@@ -426,26 +438,59 @@ export function LivePositionsPanel({
                         <TableHead className="text-right">Current Price</TableHead>
                         <TableHead>Open Time</TableHead>
                         <TableHead className="text-right">P/L</TableHead>
+                        <TableHead className="w-8"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {showGroupedPositions ? (
-                        <TableRow>
-                          <TableCell>{marketSymbol}</TableCell>
-                          <TableCell className={groupedPositionSide === ORDER_SIDE_BUY ? 'text-emerald-300' : 'text-rose-300'}>
-                            {groupedPositionSide}
-                          </TableCell>
-                          <TableCell className="text-right">{positionState.availableQuantity.toFixed(4)}</TableCell>
-                          <TableCell className="text-right">{formatPrice(positionState.averageEntryPrice, precision)}</TableCell>
-                          <TableCell className="text-right">{formatPrice(positionState.markPrice, precision)}</TableCell>
-                          <TableCell>{formatTimestamp(groupedOpenPositionOpenedAt)}</TableCell>
-                          <TableCell className={`text-right ${positionState.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                            {formatSignedCurrencyAmount(positionState.unrealizedPnl, currency)}
-                          </TableCell>
-                        </TableRow>
+                        openPositionStates.map(positionState => (
+                          <TableRow key={`${positionState.marketId}:${positionState.side}`}>
+                            <TableCell>{marketSymbol}</TableCell>
+                            <TableCell className={positionState.side === ORDER_SIDE_BUY ? 'text-emerald-300' : 'text-rose-300'}>
+                              {positionState.side}
+                            </TableCell>
+                            <TableCell className="text-right">{positionState.availableQuantity.toFixed(4)}</TableCell>
+                            <TableCell className="text-right">{formatPrice(positionState.averageEntryPrice, precision)}</TableCell>
+                            <TableCell className="text-right">{formatPrice(positionState.markPrice, precision)}</TableCell>
+                            <TableCell>{formatTimestamp(groupedOpenPositionOpenedAtBySide.get(positionState.side))}</TableCell>
+                            <TableCell className={`text-right ${positionState.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                              {formatSignedCurrencyAmount(positionState.unrealizedPnl, currency)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="default"
+                                  size="sm"
+                                  className="bg-rose-400/15 text-rose-100 hover:bg-rose-400/20"
+                                  disabled={isSubmitting}
+                                  onClick={() => {
+                                    void handleCloseOpenPosition(positionState, positionState.availableQuantity);
+                                  }}
+                                >
+                                  {isSubmitting && selectedPosition?.side === positionState.side ? 'Closing...' : 'Close'}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedPosition(positionState);
+                                    setPartialCloseInput(
+                                      Math.min(Number.parseFloat(defaultTradeQuantity), positionState.availableQuantity).toString()
+                                    );
+                                    setIsModifyDialogOpen(true);
+                                  }}
+                                >
+                                  Modify
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
                       ) : (
                         openPositionLots.map(positionLot => (
-                          <TableRow key={positionLot.id.toString()}>
+                          <TableRow key={positionLot.id.toString()} className="group">
                             <TableCell>{marketSymbol}</TableCell>
                             <TableCell className={positionLot.side === ORDER_SIDE_BUY ? 'text-emerald-300' : 'text-rose-300'}>
                               {positionLot.side}
@@ -456,6 +501,24 @@ export function LivePositionsPanel({
                             <TableCell>{formatTimestamp(positionLot.openedAt)}</TableCell>
                             <TableCell className={`text-right ${positionLot.unrealizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                               {formatSignedCurrencyAmount(positionLot.unrealizedPnl, currency)}
+                            </TableCell>
+                            <TableCell className="w-8">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-7 p-0 text-rose-300 hover:bg-rose-400/15 hover:text-rose-100"
+                                    disabled={isSubmitting}
+                                    onClick={() => { void handleCloseLot(positionLot); }}
+                                  >
+                                    {closingLotId === positionLot.id ? <Spinner /> : <CircleX />}
+                                    <span className="sr-only">Close position</span>
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" sideOffset={8}>Close position</TooltipContent>
+                              </Tooltip>
                             </TableCell>
                           </TableRow>
                         ))
@@ -544,23 +607,33 @@ export function LivePositionsPanel({
         </CardContent>
       </Card>
 
-      {isModifyDialogOpen && positionState ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4">
-          <Card className="w-full max-w-md rounded-[24px] border-white/10 bg-[#08111d] text-slate-300 shadow-[0_30px_100px_rgba(0,0,0,0.42)]">
-            <CardHeader className="p-4 pb-0">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <CardTitle className="text-sm font-medium text-white">Partial close {marketSymbol}</CardTitle>
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={() => setIsModifyDialogOpen(false)}>
-                  Close
-                </Button>
-              </div>
-            </CardHeader>
+      <Dialog
+        open={isModifyDialogOpen && !!selectedPosition}
+        onOpenChange={open => {
+          setIsModifyDialogOpen(open);
 
-            <CardContent className="space-y-4 p-4">
+          if (!open) {
+            setSelectedPosition(null);
+          }
+        }}
+      >
+        {selectedPosition ? (
+          <DialogContent
+            showCloseButton={false}
+            className="max-w-md p-0 text-slate-300 shadow-[0_30px_100px_rgba(0,0,0,0.42)]"
+          >
+            <DialogHeader className="p-4 pb-0">
+              <DialogTitle className="text-sm font-medium text-white">
+                Partial close {selectedPosition.side} {marketSymbol}
+              </DialogTitle>
+              <DialogDescription className="sr-only">
+                Choose how much of the open {selectedPosition.side} position to close.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 p-4">
               <div className="rounded-2xl border border-white/8 bg-white/3 px-3 py-3 text-xs text-slate-400">
-                Open size {positionState.availableQuantity.toFixed(4)} {baseAsset} · Mark {formatPrice(positionState.markPrice, precision)}
+                Open size {selectedPosition.availableQuantity.toFixed(4)} {baseAsset} · Mark {formatPrice(selectedPosition.markPrice, precision)}
               </div>
 
               <div className="space-y-2">
@@ -570,7 +643,7 @@ export function LivePositionsPanel({
                 <Input
                   type="number"
                   min="0"
-                  max={positionState.availableQuantity}
+                  max={selectedPosition.availableQuantity}
                   step="any"
                   value={partialCloseInput}
                   onChange={event => setPartialCloseInput(event.target.value)}
@@ -579,8 +652,16 @@ export function LivePositionsPanel({
                 />
               </div>
 
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" className="flex-1" onClick={() => setIsModifyDialogOpen(false)}>
+              <DialogFooter className="flex-row gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setIsModifyDialogOpen(false);
+                    setSelectedPosition(null);
+                  }}
+                >
                   Keep open
                 </Button>
                 <Button
@@ -592,13 +673,17 @@ export function LivePositionsPanel({
                     void handleSubmitPartialClose();
                   }}
                 >
-                  {isSubmitting ? 'Closing...' : positionState.quantity >= 0 ? 'Sell to close' : 'Buy to close'}
+                  {isSubmitting
+                    ? 'Closing...'
+                    : selectedPosition.side === ORDER_SIDE_BUY
+                      ? 'Sell to close'
+                      : 'Buy to close'}
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      ) : null}
+              </DialogFooter>
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </>
   );
 }
