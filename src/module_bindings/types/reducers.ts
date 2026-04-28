@@ -15,6 +15,7 @@ import DeleteExternalCandlesInRangeReducer from "../delete_external_candles_in_r
 import DeleteNotificationReducer from "../delete_notification_reducer";
 import DeletePriceAlertReducer from "../delete_price_alert_reducer";
 import IngestExternalMarketSnapshotReducer from "../ingest_external_market_snapshot_reducer";
+import MarkNotificationSeenReducer from "../mark_notification_seen_reducer";
 import PlaceLimitOrderReducer from "../place_limit_order_reducer";
 import PlaceMarketOrderReducer from "../place_market_order_reducer";
 import ReplaceExternalOrderBookReducer from "../replace_external_order_book_reducer";
@@ -35,6 +36,7 @@ export type DeleteExternalCandlesInRangeParams = __Infer<typeof DeleteExternalCa
 export type DeleteNotificationParams = __Infer<typeof DeleteNotificationReducer>;
 export type DeletePriceAlertParams = __Infer<typeof DeletePriceAlertReducer>;
 export type IngestExternalMarketSnapshotParams = __Infer<typeof IngestExternalMarketSnapshotReducer>;
+export type MarkNotificationSeenParams = __Infer<typeof MarkNotificationSeenReducer>;
 export type PlaceLimitOrderParams = __Infer<typeof PlaceLimitOrderReducer>;
 export type PlaceMarketOrderParams = __Infer<typeof PlaceMarketOrderReducer>;
 export type ReplaceExternalOrderBookParams = __Infer<typeof ReplaceExternalOrderBookReducer>;

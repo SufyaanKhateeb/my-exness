@@ -43,6 +43,7 @@ import DeleteExternalCandlesInRangeReducer from "./delete_external_candles_in_ra
 import DeleteNotificationReducer from "./delete_notification_reducer";
 import DeletePriceAlertReducer from "./delete_price_alert_reducer";
 import IngestExternalMarketSnapshotReducer from "./ingest_external_market_snapshot_reducer";
+import MarkNotificationSeenReducer from "./mark_notification_seen_reducer";
 import PlaceLimitOrderReducer from "./place_limit_order_reducer";
 import PlaceMarketOrderReducer from "./place_market_order_reducer";
 import ReplaceExternalOrderBookReducer from "./replace_external_order_book_reducer";
@@ -228,6 +229,7 @@ const reducersSchema = __reducers(
   __reducerSchema("delete_notification", DeleteNotificationReducer),
   __reducerSchema("delete_price_alert", DeletePriceAlertReducer),
   __reducerSchema("ingest_external_market_snapshot", IngestExternalMarketSnapshotReducer),
+  __reducerSchema("mark_notification_seen", MarkNotificationSeenReducer),
   __reducerSchema("place_limit_order", PlaceLimitOrderReducer),
   __reducerSchema("place_market_order", PlaceMarketOrderReducer),
   __reducerSchema("replace_external_order_book", ReplaceExternalOrderBookReducer),

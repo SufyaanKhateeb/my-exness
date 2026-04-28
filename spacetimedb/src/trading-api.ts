@@ -47,6 +47,7 @@ import {
   listOpenPositionLotStateRows,
   listPositionHistoryStateRows,
   listPriceAlertStateRows,
+  notifyOrderOpened,
   requireAllowedExecutionType,
   requireAllowedPriceAlertExpiryDays,
   requireAllowedPriceAlertReference,
@@ -293,6 +294,8 @@ const placeLimitOrder = spacetimedb.reducer(
       filledAt: undefined,
     });
 
+    notifyOrderOpened(ctx, order, now);
+
     const execution = executeAgainstOrderBook(ctx, marketId, side, quantity, limitPrice, now);
 
     if (execution) {
@@ -463,6 +466,21 @@ const deleteNotification = spacetimedb.reducer(
   }
 );
 
+const markNotificationSeen = spacetimedb.reducer(
+  { notificationId: t.u64() },
+  (ctx, { notificationId }) => {
+    const { auth0UserId } = ensureTradingResourceAccess(ctx);
+    const notification = ctx.db.notification.id.find(notificationId);
+
+    if (!notification || notification.auth0UserId !== auth0UserId) {
+      throw new SenderError('Notification not found.');
+    }
+
+    notification.seen = true;
+    ctx.db.notification.id.update(notification);
+  }
+);
+
 export {
   cancelOrder,
   closeMarketPosition,
@@ -471,6 +489,7 @@ export {
   currentUserExists,
   deleteNotification,
   deletePriceAlert,
+  markNotificationSeen,
   myMarketOrders,
   myMarketPositionState,
   myNotifications,

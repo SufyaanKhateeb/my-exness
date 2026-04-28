@@ -307,7 +307,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <Auth0UserSync user={user ?? undefined}>
           <NotificationBridge />
           {children}
-          <Toaster position="top-right" />
+          <Toaster position="bottom-left" />
         </Auth0UserSync>
       </SpacetimeDBProvider>
       <ConnectionStatusIndicator state={connectionState} host={HOST} databaseName={DB_NAME} />

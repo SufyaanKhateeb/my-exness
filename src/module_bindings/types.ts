@@ -175,6 +175,7 @@ export const Notification = __t.object("Notification", {
   title: __t.string(),
   message: __t.string(),
   marketId: __t.option(__t.u32()),
+  seen: __t.bool(),
   createdAt: __t.timestamp(),
 });
 export type Notification = __Infer<typeof Notification>;
@@ -187,6 +188,7 @@ export const NotificationState = __t.object("NotificationState", {
   title: __t.string(),
   message: __t.string(),
   marketId: __t.option(__t.u32()),
+  seen: __t.bool(),
   createdAt: __t.timestamp(),
 });
 export type NotificationState = __Infer<typeof NotificationState>;

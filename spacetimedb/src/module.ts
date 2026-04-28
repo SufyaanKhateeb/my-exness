@@ -27,6 +27,8 @@ const PRICE_ALERT_DIRECTION_BELOW = 'below';
 const NOTIFICATION_LEVEL_INFO = 'info';
 const NOTIFICATION_LEVEL_SUCCESS = 'success';
 const NOTIFICATION_LEVEL_WARNING = 'warning';
+const NOTIFICATION_KIND_ORDER_OPEN = 'order_open';
+const NOTIFICATION_KIND_ORDER_FILLED = 'order_filled';
 const NOTIFICATION_KIND_PRICE_ALERT_TRIGGERED = 'price_alert_triggered';
 const NOTIFICATION_KIND_PRICE_ALERT_EXPIRED = 'price_alert_expired';
 const POSITION_EPSILON = 1e-9;
@@ -153,6 +155,7 @@ const notificationStateRow = t.row('NotificationState', {
   title: t.string(),
   message: t.string(),
   marketId: t.option(t.u32()),
+  seen: t.bool(),
   createdAt: t.timestamp(),
 });
 
@@ -247,6 +250,7 @@ const notificationRow = t.row('Notification', {
   title: t.string(),
   message: t.string(),
   marketId: t.option(t.u32()),
+  seen: t.bool(),
   createdAt: t.timestamp(),
 });
 
@@ -430,6 +434,8 @@ export {
   ORDER_EXECUTION_TYPE_OPEN,
   NOTIFICATION_KIND_PRICE_ALERT_EXPIRED,
   NOTIFICATION_KIND_PRICE_ALERT_TRIGGERED,
+  NOTIFICATION_KIND_ORDER_FILLED,
+  NOTIFICATION_KIND_ORDER_OPEN,
   NOTIFICATION_LEVEL_INFO,
   NOTIFICATION_LEVEL_SUCCESS,
   NOTIFICATION_LEVEL_WARNING,

@@ -10,14 +10,6 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default __t.row({
-  id: __t.u64(),
-  auth0UserId: __t.string().name("auth_0_user_id"),
-  kind: __t.string(),
-  level: __t.string(),
-  title: __t.string(),
-  message: __t.string(),
-  marketId: __t.option(__t.u32()).name("market_id"),
-  seen: __t.bool(),
-  createdAt: __t.timestamp().name("created_at"),
-});
+export default {
+  notificationId: __t.u64(),
+};

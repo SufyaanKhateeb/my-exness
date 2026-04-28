@@ -15,12 +15,13 @@ type NotificationState = {
   title: string;
   message: string;
   marketId: number | undefined;
+  seen: boolean;
   createdAt: { toMillis(): bigint };
 };
 
 function NotificationBridge() {
   const { user } = useUser();
-  const deleteNotification = useReducer(reducers.deleteNotification);
+  const markNotificationSeen = useReducer(reducers.markNotificationSeen);
   const [notificationRows] = useTable(tables.myNotifications);
   const dispatchedNotificationIdsRef = useRef<Set<string>>(new Set());
 
@@ -52,11 +53,11 @@ function NotificationBridge() {
         toast(notification.title, { description: notification.message, duration: 6000 });
       }
 
-      void deleteNotification({ notificationId: notification.id }).catch(() => {
+      void markNotificationSeen({ notificationId: notification.id }).catch(() => {
         dispatchedNotificationIdsRef.current.delete(notificationId);
       });
     }
-  }, [deleteNotification, notificationRows]);
+  }, [markNotificationSeen, notificationRows]);
 
   return null;
 }

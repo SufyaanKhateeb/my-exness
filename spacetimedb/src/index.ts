@@ -27,6 +27,7 @@ export {
   currentUserExists,
   deleteNotification,
   deletePriceAlert,
+  markNotificationSeen,
   myMarketOrders,
   myMarketPositionState,
   myNotifications,

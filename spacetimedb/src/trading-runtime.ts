@@ -3,6 +3,8 @@ import { SenderError } from 'spacetimedb/server';
 import {
   ORDER_EXECUTION_TYPE_CLOSE,
   ORDER_EXECUTION_TYPE_OPEN,
+  NOTIFICATION_KIND_ORDER_FILLED,
+  NOTIFICATION_KIND_ORDER_OPEN,
   NOTIFICATION_KIND_PRICE_ALERT_EXPIRED,
   NOTIFICATION_KIND_PRICE_ALERT_TRIGGERED,
   NOTIFICATION_LEVEL_INFO,
@@ -246,12 +248,61 @@ function createNotification(
     title: input.title,
     message: input.message,
     marketId: input.marketId,
+    seen: false,
     createdAt: input.createdAt,
+  });
+}
+
+function formatOrderSummary(
+  order: Pick<TradeOrderRowType, 'executionType' | 'orderType' | 'side' | 'quantity' | 'limitPrice'>,
+  fallbackPrice?: number
+) {
+  const referencePrice = order.limitPrice ?? fallbackPrice;
+  const formattedPrice = referencePrice != null ? ` @ ${referencePrice.toFixed(4)}` : '';
+
+  return `${order.executionType} ${order.orderType} ${order.side} ${order.quantity.toFixed(4)}${formattedPrice}`;
+}
+
+function notifyOrderOpened(
+  ctx: ExchangeCtx,
+  order: Pick<TradeOrderRowType, 'auth0UserId' | 'marketId' | 'executionType' | 'orderType' | 'side' | 'quantity' | 'limitPrice'>,
+  createdAt: ExchangeCtx['timestamp']
+) {
+  const marketSymbol = ctx.db.market.id.find(order.marketId)?.symbol ?? `Market #${order.marketId}`;
+
+  createNotification(ctx, {
+    auth0UserId: order.auth0UserId,
+    kind: NOTIFICATION_KIND_ORDER_OPEN,
+    level: NOTIFICATION_LEVEL_INFO,
+    title: 'Order opened',
+    message: `${marketSymbol}: ${formatOrderSummary(order)} is now open.`,
+    marketId: order.marketId,
+    createdAt,
+  });
+}
+
+function notifyOrderFilled(
+  ctx: ExchangeCtx,
+  order: Pick<TradeOrderRowType, 'auth0UserId' | 'marketId' | 'executionType' | 'orderType' | 'side' | 'quantity' | 'limitPrice'>,
+  fillPrice: number,
+  filledAt: ExchangeCtx['timestamp']
+) {
+  const marketSymbol = ctx.db.market.id.find(order.marketId)?.symbol ?? `Market #${order.marketId}`;
+
+  createNotification(ctx, {
+    auth0UserId: order.auth0UserId,
+    kind: NOTIFICATION_KIND_ORDER_FILLED,
+    level: NOTIFICATION_LEVEL_SUCCESS,
+    title: 'Order filled',
+    message: `${marketSymbol}: ${formatOrderSummary(order, fillPrice)} filled at ${fillPrice.toFixed(4)}.`,
+    marketId: order.marketId,
+    createdAt: filledAt,
   });
 }
 
 function listNotificationStateRows(ctx: TradingReadCtx, auth0UserId: string) {
   return (Array.from(ctx.db.notification.auth0UserId.filter(auth0UserId)) as NotificationRowType[])
+    .filter(notification => !notification.seen)
     .sort((left, right) => Number(left.createdAt.toMillis() - right.createdAt.toMillis()))
     .map(notification => ({
       id: notification.id,
@@ -261,6 +312,7 @@ function listNotificationStateRows(ctx: TradingReadCtx, auth0UserId: string) {
       title: notification.title,
       message: notification.message,
       marketId: notification.marketId,
+      seen: notification.seen,
       createdAt: notification.createdAt,
     }));
 }
@@ -785,6 +837,8 @@ function fillTradeOrder(
   order.filledAt = filledAt;
   order.updatedAt = filledAt;
   ctx.db.tradeOrder.id.update(order);
+
+  notifyOrderFilled(ctx, order, fillPrice, filledAt);
 }
 
 function maybeFillOpenLimitOrders(
@@ -855,6 +909,7 @@ export {
   listNotificationStateRows,
   listPositionHistoryStateRows,
   listPriceAlertStateRows,
+  notifyOrderOpened,
   maybeFillOpenLimitOrders,
   requireAllowedExecutionType,
   requireAllowedPriceAlertExpiryDays,
