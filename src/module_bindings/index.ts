@@ -58,6 +58,7 @@ import UpsertExternalMinuteCandlesReducer from "./upsert_external_minute_candles
 // Import all procedure arg schemas
 import * as CurrentUserCanTradeProcedure from "./current_user_can_trade_procedure";
 import * as CurrentUserExistsProcedure from "./current_user_exists_procedure";
+import * as PingProcedure from "./ping_procedure";
 
 // Import all table schema definitions
 import MarketRow from "./market_table";
@@ -246,6 +247,7 @@ const reducersSchema = __reducers(
 const proceduresSchema = __procedures(
   __procedureSchema("current_user_can_trade", CurrentUserCanTradeProcedure.params, CurrentUserCanTradeProcedure.returnType),
   __procedureSchema("current_user_exists", CurrentUserExistsProcedure.params, CurrentUserExistsProcedure.returnType),
+  __procedureSchema("ping", PingProcedure.params, PingProcedure.returnType),
 );
 
 /** The remote SpacetimeDB module schema, both runtime and type information. */

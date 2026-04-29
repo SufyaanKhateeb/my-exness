@@ -73,6 +73,10 @@ const currentUserCanTrade = spacetimedb.procedure(t.bool(), ctx => {
   });
 });
 
+const ping = spacetimedb.procedure(t.string(), () => {
+  return 'pong';
+});
+
 const myTradingAccountState = spacetimedb.view(
   { name: 'my_trading_account_state', public: true },
   t.option(tradingAccountStateRow),
@@ -497,6 +501,7 @@ export {
   myPositionHistory,
   myPriceAlerts,
   myTradingAccountState,
+  ping,
   placeLimitOrder,
   placeMarketOrder,
   syncCurrentUser,

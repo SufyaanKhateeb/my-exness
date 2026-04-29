@@ -8,9 +8,12 @@ import { type Infer as __Infer } from "spacetimedb";
 // Import all procedure arg schemas
 import * as CurrentUserCanTradeProcedure from "../current_user_can_trade_procedure";
 import * as CurrentUserExistsProcedure from "../current_user_exists_procedure";
+import * as PingProcedure from "../ping_procedure";
 
 export type CurrentUserCanTradeArgs = __Infer<typeof CurrentUserCanTradeProcedure.params>;
 export type CurrentUserCanTradeResult = __Infer<typeof CurrentUserCanTradeProcedure.returnType>;
 export type CurrentUserExistsArgs = __Infer<typeof CurrentUserExistsProcedure.params>;
 export type CurrentUserExistsResult = __Infer<typeof CurrentUserExistsProcedure.returnType>;
+export type PingArgs = __Infer<typeof PingProcedure.params>;
+export type PingResult = __Infer<typeof PingProcedure.returnType>;
 

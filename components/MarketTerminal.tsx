@@ -28,6 +28,7 @@ export default function MarketTerminal() {
   const selectedMarket =
     sortedMarkets.find(market => market.id === activeMarketId) ?? sortedMarkets[0] ?? null;
 
+    console.log(marketsReady, selectedMarket);
   if (!marketsReady || !selectedMarket) {
     return (
       <div className="flex min-h-155 items-center justify-center bg-transparent border-none text-sm text-slate-400">

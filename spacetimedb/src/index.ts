@@ -35,6 +35,7 @@ export {
   myPositionHistory,
   myPriceAlerts,
   myTradingAccountState,
+  ping,
   placeLimitOrder,
   placeMarketOrder,
   syncCurrentUser,
