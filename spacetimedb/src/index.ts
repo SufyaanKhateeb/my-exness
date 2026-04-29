@@ -8,7 +8,6 @@ export type {
   TradingReadCtx,
 } from './module';
 export { init, onConnect, onDisconnect } from './lifecycle';
-export { add, sayHello } from './misc-api';
 export {
   bootstrapExternalMarket,
   deleteExternalCandlesInRange,

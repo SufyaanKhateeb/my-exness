@@ -6,7 +6,6 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
-import AddReducer from "../add_reducer";
 import BootstrapExternalMarketReducer from "../bootstrap_external_market_reducer";
 import CancelOrderReducer from "../cancel_order_reducer";
 import CloseMarketPositionReducer from "../close_market_position_reducer";
@@ -20,14 +19,12 @@ import PlaceLimitOrderReducer from "../place_limit_order_reducer";
 import PlaceMarketOrderReducer from "../place_market_order_reducer";
 import ReplaceExternalOrderBookReducer from "../replace_external_order_book_reducer";
 import ResetSimulationReducer from "../reset_simulation_reducer";
-import SayHelloReducer from "../say_hello_reducer";
 import SyncCurrentUserReducer from "../sync_current_user_reducer";
 import UpsertExternalDayCandleReducer from "../upsert_external_day_candle_reducer";
 import UpsertExternalDayCandlesReducer from "../upsert_external_day_candles_reducer";
 import UpsertExternalMinuteCandleReducer from "../upsert_external_minute_candle_reducer";
 import UpsertExternalMinuteCandlesReducer from "../upsert_external_minute_candles_reducer";
 
-export type AddParams = __Infer<typeof AddReducer>;
 export type BootstrapExternalMarketParams = __Infer<typeof BootstrapExternalMarketReducer>;
 export type CancelOrderParams = __Infer<typeof CancelOrderReducer>;
 export type CloseMarketPositionParams = __Infer<typeof CloseMarketPositionReducer>;
@@ -41,7 +38,6 @@ export type PlaceLimitOrderParams = __Infer<typeof PlaceLimitOrderReducer>;
 export type PlaceMarketOrderParams = __Infer<typeof PlaceMarketOrderReducer>;
 export type ReplaceExternalOrderBookParams = __Infer<typeof ReplaceExternalOrderBookReducer>;
 export type ResetSimulationParams = __Infer<typeof ResetSimulationReducer>;
-export type SayHelloParams = __Infer<typeof SayHelloReducer>;
 export type SyncCurrentUserParams = __Infer<typeof SyncCurrentUserReducer>;
 export type UpsertExternalDayCandleParams = __Infer<typeof UpsertExternalDayCandleReducer>;
 export type UpsertExternalDayCandlesParams = __Infer<typeof UpsertExternalDayCandlesReducer>;

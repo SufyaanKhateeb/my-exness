@@ -34,7 +34,6 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
-import AddReducer from "./add_reducer";
 import BootstrapExternalMarketReducer from "./bootstrap_external_market_reducer";
 import CancelOrderReducer from "./cancel_order_reducer";
 import CloseMarketPositionReducer from "./close_market_position_reducer";
@@ -48,7 +47,6 @@ import PlaceLimitOrderReducer from "./place_limit_order_reducer";
 import PlaceMarketOrderReducer from "./place_market_order_reducer";
 import ReplaceExternalOrderBookReducer from "./replace_external_order_book_reducer";
 import ResetSimulationReducer from "./reset_simulation_reducer";
-import SayHelloReducer from "./say_hello_reducer";
 import SyncCurrentUserReducer from "./sync_current_user_reducer";
 import UpsertExternalDayCandleReducer from "./upsert_external_day_candle_reducer";
 import UpsertExternalDayCandlesReducer from "./upsert_external_day_candles_reducer";
@@ -221,7 +219,6 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
-  __reducerSchema("add", AddReducer),
   __reducerSchema("bootstrap_external_market", BootstrapExternalMarketReducer),
   __reducerSchema("cancel_order", CancelOrderReducer),
   __reducerSchema("close_market_position", CloseMarketPositionReducer),
@@ -235,7 +232,6 @@ const reducersSchema = __reducers(
   __reducerSchema("place_market_order", PlaceMarketOrderReducer),
   __reducerSchema("replace_external_order_book", ReplaceExternalOrderBookReducer),
   __reducerSchema("reset_simulation", ResetSimulationReducer),
-  __reducerSchema("say_hello", SayHelloReducer),
   __reducerSchema("sync_current_user", SyncCurrentUserReducer),
   __reducerSchema("upsert_external_day_candle", UpsertExternalDayCandleReducer),
   __reducerSchema("upsert_external_day_candles", UpsertExternalDayCandlesReducer),
